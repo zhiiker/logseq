@@ -2,6 +2,7 @@
     "name": "logseq",
     "version": "0.0.1",
     "private": true,
+    "main": "resources/electron.js",
     "devDependencies": {
         "@tailwindcss/ui": "^0.1.3",
         "cssnano": "^4.1.10",
@@ -27,14 +28,15 @@
         "clean": "gulp clean",
         "gulp:watch": "gulp watch",
         "gulp:build": "NODE_ENV=production gulp build",
-        "cljs:watch": "clojure -A:cljs watch app publishing",
+        "cljs:watch": "clojure -A:cljs watch app publishing electron",
         "cljs:release": "clojure -A:cljs release app publishing",
         "cljs:watch-app": "clojure -A:cljs watch app",
         "cljs:release-app": "clojure -A:cljs release app",
         "cljs:release-publishing": "clojure -A:cljs release publishing",
         "cljs:dev-release-app": "clojure -A:cljs release app --config-merge '{:closure-defines {frontend.config/DEV-RELEASE true}}'",
         "cljs:debug": "clojure -A:cljs release app --debug",
-        "cljs:report": "clojure -A:cljs run shadow.cljs.build-report app report.html"
+        "cljs:report": "clojure -A:cljs run shadow.cljs.build-report app report.html",
+        "cljs:build-electron": "clojure -A:cljs compile app electron"
     },
     "dependencies": {
         "codemirror": "^5.58.1",
@@ -47,6 +49,7 @@
         "react-dom": "^16.12.0",
         "react-textarea-autosize": "^8.0.1",
         "react-transition-group": "^4.3.0",
-        "webdav": "^3.3.0"
+        "webdav": "^3.3.0",
+        "electron": "^11.0.1"
     }
 }
