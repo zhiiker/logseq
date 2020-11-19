@@ -4,7 +4,7 @@
 
  :builds
  {:electron {:target :node-script
-             :output-to "resources/electron.js"
+             :output-to "./static/electron.js"
              :main electron.core/main}
 
   :app

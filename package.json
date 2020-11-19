@@ -2,7 +2,7 @@
     "name": "logseq",
     "version": "0.0.1",
     "private": true,
-    "main": "resources/electron.js",
+    "main": "static/electron.js",
     "devDependencies": {
         "@tailwindcss/ui": "^0.1.3",
         "cssnano": "^4.1.10",

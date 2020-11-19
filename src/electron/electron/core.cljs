@@ -9,7 +9,7 @@
                         (clj->js {:width 800
                                   :height 600})))
   ; Path is relative to the compiled js file (main.js in our case)
-  ^html (.loadURL @main-window (str "http://localhost:3000"))
+  ^html (.loadURL @main-window (str "file://" js/__dirname "/index.html"))
   ^js (.on @main-window "closed" #(reset! main-window nil)))
 
 (defn main []
