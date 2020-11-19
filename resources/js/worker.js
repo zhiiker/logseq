@@ -1,4 +1,12 @@
-onmessage = function(e) {}
+importScripts(
+  // Batched optimization
+  "./lightning-fs.min.js?v=0.0.2.3",
+  "https://cdn.jsdelivr.net/npm/isomorphic-git@1.7.4/index.umd.min.js",
+  "https://cdn.jsdelivr.net/npm/isomorphic-git@1.7.4/http/web/index.umd.js",
+  // Fixed a bug
+  "./magic_portal.js"
+);
+
 
 const detect = () => {
   if (typeof window !== 'undefined' && !self.skipWaiting) {

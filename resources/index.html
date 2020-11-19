@@ -2,67 +2,37 @@
 <html>
 
 <head>
-    <meta charset="utf-8">
-    <meta content="minimum-scale=1, initial-scale=1, width=device-width, shrink-to-fit=no" name="viewport">
+    <meta charset="utf-8"/>
+    <meta content="minimum-scale=1, initial-scale=1, width=device-width, shrink-to-fit=no" name="viewport"/>
     <meta content="Agp2znmEoRKqxMhzbNL2R3UOCNcagP7+fu0KSM+09O21u7EHdJgqhTrslpfyFC/dSt6jvpaDzNiFf2769fLHMAUAAABoeyJvcmlnaW4iOiJodHRwczovL2xvZ3NlcS5jb206NDQzIiwiZmVhdHVyZSI6Ik5hdGl2ZUZpbGVTeXN0ZW0yIiwiZXhwaXJ5IjoxNTk3Mjg5MzY5LCJpc1N1YmRvbWFpbiI6dHJ1ZX0=" http-equiv="origin-trial">
-    <link href="./css/style.css" rel="stylesheet" type="text/css">
-    <link href="./img/logo.png" rel="shortcut icon" type="image/png">
-    <link href="./img/logo.png" rel="shortcut icon" sizes="192x192">
-    <link href="./img/logo.png" rel="apple-touch-icon">
-    <meta content="summary" name="twitter:card">
-    <meta content="A local-first notes app which uses Git to store and sync your knowledge." name="twitter:description">
-    <meta content="@logseq" name="twitter:site">
-    <meta content="A local-first notes app." name="twitter:title">
-    <meta content="/img/logo.png" name="twitter:image:src">
-    <meta content="A local-first notes app." name="twitter:image:alt">
-    <meta content="A local-first notes app." property="og:title">
-    <meta content="site" property="og:type">
-    <meta content="https://logseq.com" property="og:url">
-    <meta content="/img/logo.png" property="og:image">
-    <meta content="A local-first notes app which uses Git to store and sync your knowledge." property="og:description">
+    <link href="/static/css/style.css" rel="stylesheet" type="text/css"/>
+    <link href="/static/img/logo.png" rel="shortcut icon" type="image/png"/>
+    <link href="/static/img/logo.png" rel="shortcut icon" sizes="192x192"/>
+    <link href="/static/img/logo.png" rel="apple-touch-icon"/>
+    <meta content="summary" name="twitter:card"/>
+    <meta content="A local-first notes app which uses Git to store and sync your knowledge." name="twitter:description"/>
+    <meta content="@logseq" name="twitter:site"/>
+    <meta content="A local-first notes app." name="twitter:title"/>
+    <meta content="/static/img/logo.png" name="twitter:image:src"/>
+    <meta content="A local-first notes app." name="twitter:image:alt"/>
+    <meta content="A local-first notes app." property="og:title"/>
+    <meta content="site" property="og:type"/>
+    <meta content="https://logseq.com" property="og:url"/>
+    <meta content="/static//img/logo.png" property="og:image"/>
+    <meta content="A local-first notes app which uses Git to store and sync your knowledge." property="og:description"/>
+    <meta content="logseq" property="og:site_name"/>
+    <meta description="A local-first notes app which uses Git to store and sync your knowledge."/>
     <title>Logseq: A local-first notes app</title>
-    <meta content="logseq" property="og:site_name">
-    <meta description="A local-first notes app which uses Git to store and sync your knowledge.">
-    </script>
 </head>
 
 <body>
 <div id="root"></div>
-<script src="./js/mldoc.min.js"></script>
-<script src="./js/magic_portal.js"></script>
+<script src="/static/js/mldoc.min.js"></script>
+<script src="/static/js/magic_portal.js"></script>
 <script>
-
-// copy from https://gist.github.com/walfie/a80c4432bcff70fb826d5d28158e9cc4
-
-function createWebWorkerFromFunction(f) {
-  var blobContents = ['(', f.toString(), ')();'];
-  var blob = new Blob(blobContents, { type: 'application/javascript'});
-  var blobUrl = URL.createObjectURL(blob);
-  var worker = new Worker(blobUrl);
-  URL.revokeObjectURL(blobUrl);
-  return worker;
-}
-
-var worker = createWebWorkerFromFunction(function() {
-  self.onmessage = function(e) {
-    importScripts(e.data.scriptUrl + '/js/lightning-fs.min.js?v=0.0.2.3');
-    importScripts('https://cdn.jsdelivr.net/npm/isomorphic-git@1.7.4/index.umd.min.js');
-    importScripts('https://cdn.jsdelivr.net/npm/isomorphic-git@1.7.4/http/web/index.umd.js');
-    importScripts(e.data.scriptUrl + '/js/magic_portal.js');
-    importScripts(e.data.scriptUrl + '/js/worker.js');
-  }
-});
-
-var workerUrl = (function() {
-  var parts = document.location.href.split('/');
-  parts.pop();
-  return parts.join('/');
-}());
-
-worker.postMessage({ scriptUrl: workerUrl });
-
-const portal = new MagicPortal(worker);;
- (async() =>{
+let worker = new Worker("/static/js/worker.js");
+const portal = new MagicPortal(worker);
+(async () => {
   const git = await portal.get('git');
   window.git = git;
   const fs = await portal.get('fs');
@@ -72,8 +42,8 @@ const portal = new MagicPortal(worker);;
   const workerThread = await portal.get('workerThread');
   window.workerThread = workerThread;
 })();
-
 </script>
-<script src="./js/main.js"></script>
+
+<script src="/static/js/main.js"></script>
 </body>
 </html>
