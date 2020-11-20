@@ -42,14 +42,6 @@
        :submitURL "https://example.com/submit-url"
        :autoSubmit false}))
 
-  (let [option [{:scheme "http"
-                 :privileges {:standard true
-                              :secure true
-                              :allowServiceWorkers true
-                              :supportFetchAPI true
-                              :corsEnabled true}}]]
-    (.registerSchemesAsPrivileged protocol (clj->js option)))
-
   (.on app "window-all-closed" #(when-not (= js/process.platform "darwin")
                                   (.quit app)))
   (.on app "ready" init-browser))
