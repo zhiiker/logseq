@@ -147,3 +147,18 @@ Go to <https://github.com/logseq/logseq/releases>, download the `logseq.jar` and
 Run `start-windows.bat` which is located in the repo. This will open a second terminal that runs Logseq's backend server. To completely stop Logseq, you'll need to also close that second terminal that was opened.
 
 `start-windows.bat` will try to start PostgreSQL for you if it's not already started.
+
+## Desktop APP
+
+### Setup
+
+```
+npm install electron -g
+npm install
+
+yarn watch
+
+#open another console
+
+electron . 
+```
