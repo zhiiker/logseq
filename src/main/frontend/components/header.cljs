@@ -126,7 +126,7 @@
      (when (and (not logged?)
                 (not config/publishing?))
        [:a.text-sm.font-medium.login.opacity-70.hover:opacity-100
-        {:href "/login/github"
+        {:href (str config/website "/login/github")
          :on-click (fn []
                      (storage/remove :git/current-repo))}
         (t :login-github)])
