@@ -28,3 +28,5 @@ report.html
 strings.csv
 
 .calva
+resources/electron.js
+package-lock.json
