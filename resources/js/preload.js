@@ -1,6 +1,6 @@
 const fs = require('fs')
 const path = require('path')
-const { ipcRenderer, contextBridge, shell, clipboard } = require('electron')
+const { ipcRenderer, contextBridge, shell, clipboard, webFrame } = require('electron')
 
 const IS_MAC = process.platform === 'darwin'
 const IS_WIN32 = process.platform === 'win32'
@@ -67,8 +67,14 @@ contextBridge.exposeInMainWorld('apis', {
    *
    * @param {string} html html file with embedded state
    */
-  exportPublishAssets(html, customCSSPath) {
-    ipcRenderer.invoke('export-publish-assets', html, customCSSPath)
+  exportPublishAssets(html, customCSSPath, repoPath, assetFilenames) {
+    ipcRenderer.invoke(
+      'export-publish-assets',
+      html,
+      customCSSPath,
+      repoPath,
+      assetFilenames
+    )
   },
 
   /**
@@ -130,4 +136,10 @@ contextBridge.exposeInMainWorld('apis', {
 
   getFilePathFromClipboard,
   isClipboardHasImage,
+
+  setZoomFactor (factor) {
+    webFrame.setZoomFactor(factor)
+  },
+
+  isAbsolutePath: path.isAbsolute.bind(path)
 })

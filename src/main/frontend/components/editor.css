@@ -17,6 +17,7 @@
 }
 
 .editor-wrapper {
+  width: 100%;
   margin: 0 auto;
 }
 
@@ -61,4 +62,9 @@ pre {
 .non-block-editor textarea {
   background: #f6f8fa;
   background: var(--ls-secondary-background-color);
+}
+
+/* Fix autocomplete preview  */
+.preview-trigger-wrapper > [data-tooltipped] {
+  display: block !important;
 }

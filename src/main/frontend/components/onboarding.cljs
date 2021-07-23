@@ -1,10 +1,13 @@
 (ns frontend.components.onboarding
-  (:require [rum.core :as rum]
+  (:require [frontend.components.shortcut :as shortcut]
             [frontend.components.svg :as svg]
-            [frontend.extensions.latex :as latex]
-            [frontend.extensions.highlight :as highlight]
             [frontend.context.i18n :as i18n]
-            [frontend.util :as util]))
+            [frontend.extensions.highlight :as highlight]
+            [frontend.extensions.latex :as latex]
+            [frontend.handler.route :as route-handler]
+            [frontend.ui :as ui]
+            [frontend.util :as util]
+            [rum.core :as rum]))
 
 (rum/defc intro
   []
@@ -13,9 +16,9 @@
      [:div.flex-1
       [:div.flex.flex-col.pl-1.ls-block
        [:hr {:style {:margin-top 200}}]
-       [:div.flex.flex-row.admonitionblock.align-items {:class "warning"}
+       [:div.flex.flex-row.admonitionblock.align-items {:class "important"}
         [:div.pr-4.admonition-icon.flex.flex-col.justify-center
-         {:title "Warning"} (svg/warning)]
+         {:title "Important"} (svg/tip)]
         [:div.ml-4.text-lg
          (t :on-boarding/notice)]]
        [:p
@@ -43,7 +46,9 @@
 
       [:img.shadow-2xl
        {:src
-        "https://cdn.logseq.com/%2F8b9a461d-437e-4ca5-a2da-18b51077b5142020_07_25_Screenshot%202020-07-25%2013-29-49%20%2B0800.png?Expires=4749255017&Signature=Qbx6jkgAytqm6nLxVXQQW1igfcf~umV1OcG6jXUt09TOVhgXyA2Z5jHJ3AGJASNcphs31pZf4CjFQ5mRCyVKw6N8wb8Nn-MxuTJl0iI8o-jLIAIs9q1v-2cusCvuFfXH7bq6ir8Lpf0KYAprzuZ00FENin3dn6RBW35ENQwUioEr5Ghl7YOCr8bKew3jPV~OyL67MttT3wJig1j3IC8lxDDT8Ov5IMG2GWcHERSy00F3mp3tJtzGE17-OUILdeuTFz6d-NDFAmzB8BebiurYz0Bxa4tkcdLUpD5ToFHU08jKzZExoEUY8tvaZ1-t7djmo3d~BAXDtlEhC2L1YC2aVQ__&Key-Pair-Id=APKAJE5CCD6X7MP6PTEA"
+        (if (util/electron?)
+          "img/screenshot.png"
+          "https://cdn.logseq.com/%2F8b9a461d-437e-4ca5-a2da-18b51077b5142020_07_25_Screenshot%202020-07-25%2013-29-49%20%2B0800.png?Expires=4749255017&Signature=Qbx6jkgAytqm6nLxVXQQW1igfcf~umV1OcG6jXUt09TOVhgXyA2Z5jHJ3AGJASNcphs31pZf4CjFQ5mRCyVKw6N8wb8Nn-MxuTJl0iI8o-jLIAIs9q1v-2cusCvuFfXH7bq6ir8Lpf0KYAprzuZ00FENin3dn6RBW35ENQwUioEr5Ghl7YOCr8bKew3jPV~OyL67MttT3wJig1j3IC8lxDDT8Ov5IMG2GWcHERSy00F3mp3tJtzGE17-OUILdeuTFz6d-NDFAmzB8BebiurYz0Bxa4tkcdLUpD5ToFHU08jKzZExoEUY8tvaZ1-t7djmo3d~BAXDtlEhC2L1YC2aVQ__&Key-Pair-Id=APKAJE5CCD6X7MP6PTEA")
         :alt "screenshot"}]
 
       [:div.flex.flex-col.ls-block.intro-docs
@@ -164,7 +169,10 @@
               :target "_blank"} "isomorphic-git"]
          (t :on-boarding/isomorphic-git-desc)]]
 
-       [:img {:src "https://asset.logseq.com/static/img/credits.png"
+       [:img {:src
+              (if (util/electron?)
+                "img/credits.png"
+                "https://asset.logseq.com/static/img/credits.png")
               :style {:margin "12px 0 0 0"}}]]]]))
 
 (defn help
@@ -172,6 +180,10 @@
   (rum/with-context [[t] i18n/*tongue-context*]
     [:div.help.cp__sidebar-help-docs
      [:ul
+      [:li
+       [:a {:href "https://logseq.github.io/#/page/getting%20started"
+            :target "_blank"}
+        (t :help/start)]]
       [:li
        [:a {:href "https://logseq.com/blog/about"
             :target "_blank"}
@@ -189,11 +201,11 @@
             :target "_blank"}
         (t :help/feature)]]
       [:li
-       [:a {:href "https://logseq.github.io/page/changelog"
+       [:a {:href "https://logseq.github.io/#/page/changelog"
             :target "_blank"}
         (t :help/changelog)]]
       [:li
-       [:a {:href "https://logseq.github.io/page/faq"
+       [:a {:href "https://logseq.github.io/#/page/faq"
             :target "_blank"}
         "FAQ"]]
       [:li
@@ -201,13 +213,17 @@
             :target "_blank"}
         (t :help/docs)]]
       [:li
-       [:a {:href "/blog/privacy-policy"
+       [:a {:href "https://logseq.com/blog/privacy-policy"
             :target "_blank"}
         (t :help/privacy)]]
       [:li
-       [:a {:href "/blog/terms"
+       [:a {:href "https://logseq.com/blog/terms"
             :target "_blank"}
         (t :help/terms)]]
+      [:li
+       [:a {:href "https://github.com/logseq/awesome-logseq"
+            :target "_blank"}
+        (t :help/awesome-logseq)]]
       [:li
        [:a {:href "https://discord.gg/KpN4eHY"
             :target "_blank"}
@@ -216,70 +232,16 @@
          svg/discord]]]
       [:li
        (t :help/shortcuts)
-       [:table
-        [:thead
-         [:tr
-          [:th [:b (t :help/shortcuts-triggers)]]
-          [:th (t :help/shortcut)]]]
-        [:tbody
-         [:tr [:td (t :help/slash-autocomplete)] [:td "/"]]
-         [:tr [:td (t :help/block-content-autocomplete)] [:td "<"]]
-         [:tr [:td (t :help/reference-autocomplete)] [:td "[[]]"]]
-         [:tr [:td (t :help/block-reference)] [:td "(())"]]]]
-       [:table
-        [:thead
-         [:tr
-          [:th [:span [:b (t :help/key-commands)]
-                (t :help/working-with-lists)]]
-          [:th (t :help/shortcut)]]]
-        [:tbody
-         [:tr [:td (t :help/indent-block-tab)] [:td "Tab"]]
-         [:tr [:td (t :help/unindent-block)] [:td "Shift-Tab"]]
-         [:tr [:td (t :help/move-block-up)] [:td (util/->platform-shortcut "Alt-Shift-Up")]]
-         [:tr [:td (t :help/move-block-down)] [:td (util/->platform-shortcut "Alt-Shift-Down")]]
-         [:tr [:td (t :help/create-new-block)] [:td "Enter"]]
-         [:tr [:td (t :help/new-line-in-block)] [:td "Shift-Enter"]]
-         [:tr [:td (t :undo)] [:td (util/->platform-shortcut "Ctrl-z")]]
-         [:tr [:td (t :redo)] [:td (util/->platform-shortcut "Ctrl-y")]]
-         [:tr [:td (t :help/zoom-in)] [:td (util/->platform-shortcut (if util/mac? "Cmd-." "Alt-Right"))]]
-         [:tr [:td (t :help/zoom-out)] [:td (util/->platform-shortcut (if util/mac? "Cmd-," "Alt-left"))]]
-         [:tr [:td (t :help/follow-link-under-cursor)] [:td (util/->platform-shortcut "Ctrl-o")]]
-         [:tr [:td (t :help/open-link-in-sidebar)] [:td (util/->platform-shortcut "Ctrl-shift-o")]]
-         [:tr [:td (t :expand)] [:td (util/->platform-shortcut "Ctrl-Down")]]
-         [:tr [:td (t :collapse)] [:td (util/->platform-shortcut "Ctrl-Up")]]
-         [:tr [:td (t :select-block-above)] [:td "Shift-Up"]]
-         [:tr [:td (t :select-block-below)] [:td "Shift-Down"]]
-         [:tr [:td (t :select-all-blocks)] [:td (util/->platform-shortcut "Ctrl-Shift-a")]]]]
-       [:table
-        [:thead
-         [:tr
-          [:th [:b (t :general)]]
-          [:th (t :help/shortcut)]]]
-        [:tbody
-         [:tr [:td (t :help/toggle)] [:td "?"]]
-         [:tr [:td (t :help/git-commit-message)] [:td "c"]]
-         [:tr [:td (t :help/full-text-search)] [:td (util/->platform-shortcut "Ctrl-u")]]
-         [:tr [:td (t :help/page-search)] [:td (util/->platform-shortcut "Ctrl-Shift-u")]]
-         [:tr [:td (t :help/open-link-in-sidebar)] [:td "Shift-Click"]]
-         [:tr [:td (t :help/context-menu)] [:td "Right Click"]]
-         [:tr [:td (t :help/fold-unfold)] [:td "Tab"]]
-         [:tr [:td (t :help/toggle-contents)] [:td "t c"]]
-         [:tr [:td (t :help/toggle-doc-mode)] [:td "t d"]]
-         [:tr [:td (t :help/toggle-theme)] [:td "t t"]]
-         [:tr [:td (t :help/toggle-right-sidebar)] [:td "t r"]]
-         [:tr [:td (t :help/toggle-settings)] [:td "t s"]]
-         [:tr [:td (t :help/toggle-insert-new-block)] [:td "t e"]]
-         [:tr [:td (t :help/jump-to-journals)] [:td (if util/mac? "Cmd-j" "Alt-j")]]]]
-       [:table
-        [:thead
-         [:tr
-          [:th [:b (t :formatting)]]
-          [:th (t :help/shortcut)]]]
-        [:tbody
-         [:tr [:td (t :bold)] [:td (util/->platform-shortcut "Ctrl-b")]]
-         [:tr [:td (t :italics)] [:td (util/->platform-shortcut "Ctrl-i")]]
-         [:tr [:td (t :html-link)] [:td (util/->platform-shortcut "Ctrl-k")]]
-         [:tr [:td (t :highlight)] [:td (util/->platform-shortcut "Ctrl-h")]]]]]
+       (ui/button
+        "Customize"
+        :class "text-sm p-1 ml-3"
+        :on-click
+        (fn []
+          (route-handler/redirect! {:to :shortcut})))
+       (shortcut/trigger-table)
+       (shortcut/shortcut-table :shortcut.category/basics)
+       (shortcut/shortcut-table :shortcut.category/block-editing)
+       (shortcut/shortcut-table :shortcut.category/formatting)]
 
       [:li
        (t :help/markdown-syntax)
@@ -302,7 +264,7 @@
          "(println \"Hello world!\")")]]
          [:tr [:td "[label](https://www.example.com)"]
           [:td.text-right
-           [:a {:href "https://www.example.com"}
+           [:a {:href "https://www.example.com" :target "_blank"}
             "label"]]]
          [:tr [:td "![image](https://asset.logseq.com/static/img/logo.png)"]
           [:td.text-right

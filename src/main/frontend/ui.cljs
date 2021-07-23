@@ -4,9 +4,11 @@
             ["react-transition-group" :refer [TransitionGroup CSSTransition]]
             ["react-textarea-autosize" :as TextareaAutosize]
             ["react-resize-context" :as Resize]
+            ["react-tippy" :as react-tippy]
             [frontend.util :as util]
             [frontend.mixins :as mixins]
             [frontend.handler.notification :as notification-handler]
+            [frontend.handler.ui :as ui-handler]
             [frontend.state :as state]
             [frontend.components.svg :as svg]
             [clojure.string :as string]
@@ -14,13 +16,17 @@
             [goog.dom :as gdom]
             [medley.core :as medley]
             [frontend.ui.date-picker]
-            [frontend.context.i18n :as i18n]))
+            [frontend.context.i18n :as i18n]
+            [frontend.modules.shortcut.core :as shortcut]
+            [lambdaisland.glogi :as log]
+            [frontend.config :as config]))
 
 (defonce transition-group (r/adapt-class TransitionGroup))
 (defonce css-transition (r/adapt-class CSSTransition))
 (defonce textarea (r/adapt-class (gobj/get TextareaAutosize "default")))
 (def resize-provider (r/adapt-class (gobj/get Resize "ResizeProvider")))
 (def resize-consumer (r/adapt-class (gobj/get Resize "ResizeConsumer")))
+(def Tippy (r/adapt-class (gobj/get react-tippy "Tooltip")))
 
 (rum/defc ls-textarea < rum/reactive
   [{:keys [on-change] :as props}]
@@ -74,7 +80,7 @@
 
 (rum/defc menu-link
   [options child]
-  [:a.block.px-4.py-2.text-sm.text-gray-700.transition.ease-in-out.duration-150.cursor.menu-link
+  [:a.block.px-4.py-2.text-sm.transition.ease-in-out.duration-150.cursor.menu-link
    options
    child])
 
@@ -85,7 +91,7 @@
    (fn [{:keys [close-fn] :as state}]
      [:div.py-1.rounded-md.shadow-xs
       (when links-header links-header)
-      (for [{:keys [options title icon]} links]
+      (for [{:keys [options title icon]} (if (fn? links) (links) links)]
         (let [new-options
               (assoc options
                      :on-click (fn [e]
@@ -105,22 +111,24 @@
    opts))
 
 (defn button
-  [text & {:keys [background href class intent]
+  [text & {:keys [background href class intent on-click small?]
+           :or {small? false}
            :as   option}]
   (let [klass (if-not intent ".bg-indigo-600.hover:bg-indigo-700.focus:border-indigo-700.active:bg-indigo-700")
-        klass (if background (string/replace klass "indigo" background) klass)]
+        klass (if background (string/replace klass "indigo" background) klass)
+        klass (if small? (str klass ".px-2.py-1") klass)]
     (if href
       [:a.ui__button.is-link
        (merge
         {:type  "button"
          :class (str (util/hiccup->class klass) " " class)}
-        (dissoc option :background))
+        (dissoc option :background :class))
        text]
       [:button.ui__button
        (merge
         {:type  "button"
          :class (str (util/hiccup->class klass) " " class)}
-        (dissoc option :background))
+        (dissoc option :background :class))
        text])))
 
 (rum/defc notification-content
@@ -280,6 +288,37 @@
         (.removeEventListener viewport "resize" handler)
         (.removeEventListener viewport "scroll" handler)))))
 
+(defn setup-system-theme-effect!
+  []
+  (let [^js schemaMedia (js/window.matchMedia "(prefers-color-scheme: dark)")]
+    (.addEventListener schemaMedia "change" state/sync-system-theme!)
+    (state/sync-system-theme!)
+    #(.removeEventListener schemaMedia "change" state/sync-system-theme!)))
+
+(defn set-global-active-keystroke [val]
+  (.setAttribute js/document.body "data-active-keystroke" val))
+
+(defn setup-active-keystroke! []
+  (let [active-keystroke (atom #{})
+        handle-global-keystroke (fn [down? e]
+                                  (let [handler (if down? conj disj)
+                                        keystroke e.key]
+                                    (swap! active-keystroke handler keystroke))
+                                  (set-global-active-keystroke (apply str (interpose "+" (vec @active-keystroke)))))
+        keydown-handler (partial handle-global-keystroke true)
+        keyup-handler (partial handle-global-keystroke false)
+        clear-all #(do (set-global-active-keystroke "")
+                        (reset! active-keystroke #{}))]
+    (.addEventListener js/window "keydown" keydown-handler)
+    (.addEventListener js/window "keyup" keyup-handler)
+    (.addEventListener js/window "blur" clear-all)
+    (.addEventListener js/window "visibilitychange" clear-all)
+    (fn []
+      (.removeEventListener js/window "keydown" keydown-handler)
+      (.removeEventListener js/window "keyup" keyup-handler)
+      (.removeEventListener js/window "blur" clear-all)
+      (.removeEventListener js/window "visibilitychange" clear-all))))
+
 (defn on-scroll
   [node on-load on-top-reached]
   (let [full-height (gobj/get node "scrollHeight")
@@ -312,85 +351,51 @@
   (rum/with-context [[t] i18n/*tongue-context*]
     (rum/fragment
      body
-     [:a.fade-link.text-link.font-bold.text-4xl
-      {:on-click on-load
-       :disabled (not has-more)
-       :class (when (not has-more) "cursor-not-allowed ")}
-      (t (if has-more :page/earlier :page/no-more-journals))])))
+     (when has-more
+       [:a.fade-link.text-link.font-bold.text-4xl
+        {:on-click on-load}
+        (t :page/earlier)]))))
 
 (rum/defcs auto-complete <
   (rum/local 0 ::current-idx)
-  (mixins/event-mixin
-   (fn [state]
-     (mixins/on-key-down
-      state
-      {;; up
-       38 (fn [_ e]
-            (let [current-idx (get state ::current-idx)
-                  matched (first (:rum/args state))]
-              (util/stop e)
-              (cond
-                (>= @current-idx 1)
-                (swap! current-idx dec)
-                (= @current-idx 0)
-                (reset! current-idx (dec (count matched)))
-
-                :else
-                nil)
-              (when-let [element (gdom/getElement (str "ac-" @current-idx))]
-                (let [ac-inner (gdom/getElement "ui__ac-inner")
-                      element-top (gobj/get element "offsetTop")
-                      scroll-top (- (gobj/get element "offsetTop") 360)]
-                  (set! (.-scrollTop ac-inner) scroll-top)))))
-         ;; down
-       40 (fn [state e]
-            (let [current-idx (get state ::current-idx)
-                  matched (first (:rum/args state))]
-              (util/stop e)
-              (let [total (count matched)]
-                (if (>= @current-idx (dec total))
-                  (reset! current-idx 0)
-                  (swap! current-idx inc)))
-              (when-let [element (gdom/getElement (str "ac-" @current-idx))]
-                (let [ac-inner (gdom/getElement "ui__ac-inner")
-                      element-top (gobj/get element "offsetTop")
-                      scroll-top (- (gobj/get element "offsetTop") 360)]
-                  (set! (.-scrollTop ac-inner) scroll-top)))))
-
-         ;; enter
-       13 (fn [state e]
-            (util/stop e)
-            (let [[matched {:keys [on-chosen on-enter]}] (:rum/args state)]
-              (let [current-idx (get state ::current-idx)]
-                (if (and (seq matched)
-                         (> (count matched)
-                            @current-idx))
-                  (on-chosen (nth matched @current-idx) false)
-                  (and on-enter (on-enter state))))))})))
-  [state matched {:keys [on-chosen
-                         on-shift-chosen
-                         on-enter
-                         empty-div
-                         item-render
-                         class]}]
+  (shortcut/mixin :shortcut.handler/auto-complete)
+  [state
+   matched
+   {:keys [on-chosen
+           on-shift-chosen
+           get-group-name
+           empty-div
+           item-render
+           class]}]
   (let [current-idx (get state ::current-idx)]
     [:div#ui__ac {:class class}
      (if (seq matched)
        [:div#ui__ac-inner.hide-scrollbar
         (for [[idx item] (medley/indexed matched)]
-          (rum/with-key
-            (menu-link
-             {:id       (str "ac-" idx)
-              :class    (when (= @current-idx idx)
-                          "chosen")
-               ;; :tab-index -1
-              :on-click (fn [e]
-                          (.preventDefault e)
-                          (if (and (gobj/get e "shiftKey") on-shift-chosen)
-                            (on-shift-chosen item)
-                            (on-chosen item)))}
-             (if item-render (item-render item) item))
-            idx))]
+          [:<>
+           {:key idx}
+           (let [item-cp
+                 [:div {:key idx}
+                  (let [chosen? (= @current-idx idx)]
+                    (menu-link
+                      {:id            (str "ac-" idx)
+                       :class         (when chosen? "chosen")
+                       :on-mouse-enter #(reset! current-idx idx)
+                       :on-mouse-down (fn [e]
+                                        (util/stop e)
+                                        (if (and (gobj/get e "shiftKey") on-shift-chosen)
+                                          (on-shift-chosen item)
+                                          (on-chosen item)))}
+                      (if item-render (item-render item chosen?) item)))]]
+
+             (if get-group-name
+               (if-let [group-name (get-group-name item)]
+                 [:div
+                  [:div.ui__ac-group-name group-name]
+                  item-cp]
+                 item-cp)
+
+               item-cp))])]
        (when empty-div
          empty-div))]))
 
@@ -408,27 +413,28 @@
       {:class       (if on? (if small? "translate-x-4" "translate-x-5") "translate-x-0")
        :aria-hidden "true"}]]]))
 
-(defn tooltip
-  ([label children]
-   (tooltip label children {}))
-  ([label children {:keys [label-style]}]
-   [:div.Tooltip {:style {:display "inline"}}
-    [:div (cond->
-           {:class "Tooltip__label"}
-            label-style
-            (assoc :style label-style))
-     label]
-    children]))
+;; `sequence` can be a list of symbols or strings
+(defn keyboard-shortcut [sequence]
+  [:div.keyboard-shortcut
+   (map-indexed (fn [i key]
+          [:code {:key i}
+           ;; Display "cmd" rather than "meta" to the user to describe the Mac
+           ;; mod key, because that's what the Mac keyboards actually say.
+           (if (or (= :meta key) (= "meta" key))
+             (util/meta-key-name)
+             (name key))])
+        sequence)])
 
 (defonce modal-show? (atom false))
 (rum/defc modal-overlay
-  [state]
+  [state close-fn]
   [:div.ui__modal-overlay
    {:class (case state
              "entering" "ease-out duration-300 opacity-0"
              "entered" "ease-out duration-300 opacity-100"
              "exiting" "ease-in duration-200 opacity-100"
-             "exited" "ease-in duration-200 opacity-0")}
+             "exited" "ease-in duration-200 opacity-0")
+    :on-click close-fn}
    [:div.absolute.inset-0.opacity-75]])
 
 (rum/defc modal-panel
@@ -440,10 +446,10 @@
              "exiting" "ease-in duration-200 opacity-100 translate-y-0 sm:scale-100"
              "exited" "ease-in duration-200 opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95")}
    [:div.absolute.top-0.right-0.pt-2.pr-2
-    [:button.ui__modal-close
+    [:a.ui__modal-close.opacity-60.hover:opacity-100
      {:aria-label "Close"
       :type       "button"
-      :on-click   (fn [] (apply (or (gobj/get close-fn "user-close") close-fn) []))}
+      :on-click   close-fn}
      [:svg.h-6.w-6
       {:stroke "currentColor", :view-box "0 0 24 24", :fill "none"}
       [:path
@@ -461,28 +467,40 @@
      (mixins/hide-when-esc-or-outside
       state
       :on-hide (fn []
-                 (-> (.querySelector (rum/dom-node state) "button.ui__modal-close")
-                     (.click)))
-      :outside? false)))
+                 (some->
+                  (.querySelector (rum/dom-node state) "button.ui__modal-close")
+                  (.click)))
+      :outside? false)
+     (mixins/on-key-down
+      state
+      {;; enter
+       13 (fn [state e]
+            (some->
+             (.querySelector (rum/dom-node state) "button.ui__modal-enter")
+             (.click)))})))
   []
   (let [modal-panel-content (state/sub :modal/panel-content)
         fullscreen? (state/sub :modal/fullscreen?)
         show? (boolean modal-panel-content)
-        close-fn #(state/close-modal!)
+        close-fn (fn []
+                   (state/close-modal!)
+                   (state/close-settings!))
         modal-panel-content (or modal-panel-content (fn [close] [:div]))]
     [:div.ui__modal
      {:style {:z-index (if show? 10 -1)}}
      (css-transition
       {:in show? :timeout 0}
       (fn [state]
-        (modal-overlay state)))
+        (modal-overlay state close-fn)))
      (css-transition
       {:in show? :timeout 0}
       (fn [state]
         (modal-panel modal-panel-content state close-fn fullscreen?)))]))
 
 (defn make-confirm-modal
-  [{:keys [tag title sub-title sub-checkbox? on-cancel on-confirm] :as opts}]
+  [{:keys [tag title sub-title sub-checkbox? on-cancel on-confirm]
+    :or {on-cancel #()}
+    :as opts}]
   (fn [close-fn]
     (rum/with-context [[t] i18n/*tongue-context*]
       (let [*sub-checkbox-selected (and sub-checkbox? (atom []))]
@@ -533,6 +551,12 @@
    [:span.icon.flex.items-center svg/loading]
    [:span.text.pl-2 content]])
 
+(rum/defc rotating-arrow
+  [collapsed?]
+  [:span
+   {:class (if collapsed? "rotating-arrow collapsed" "rotating-arrow not-collapsed")}
+   (svg/caret-right)])
+
 (rum/defcs foldable <
   (rum/local false ::control?)
   (rum/local false ::collapsed?)
@@ -553,32 +577,17 @@
          {:style    {:width       14
                      :height      16
                      :margin-left -24}
-          :on-click (fn [e]
-                      (util/stop e)
-                      (swap! collapsed? not))}
-         (cond
-           @collapsed?
-           (svg/caret-right)
-
-           @control?
-           (svg/caret-down)
-
-           :else
-           [:span ""])]
+          :on-mouse-down (fn [e]
+                           (util/stop e)
+                           (swap! collapsed? not))}
+         [:span {:class (if @control? "control-show" "control-hide")}
+          (rotating-arrow @collapsed?)]]
         (if (fn? header)
           (header @collapsed?)
           header)]]]
-     [:div {:class (if @collapsed?
-                     "hidden"
-                     "initial")}
-      (cond
-        (and (fn? content) (not @collapsed?))
-        (content)
-
-        (fn? content)
-        nil
-
-        :else
+     [:div {:class (if @collapsed? "hidden" "initial")}
+      (if (fn? content)
+        (if (not @collapsed?) (content) nil)
         content)]]))
 
 (defn admonition
@@ -604,14 +613,18 @@
        (js/console.dir error)
        (assoc state ::error error))}
   [{error ::error, c :rum/react-component} error-view view]
-  (if (some? error)
+  (when error
+    (js/console.error error)
+    (log/error :ui/catch-error error))
+  (if (and (not config/dev?) (some? error))
     error-view
     view))
 
 (rum/defc select
-  [options on-change]
-  [:select.mt-1.form-select.block.w-full.px-3.text-base.leading-6.border-gray-300.focus:outline-none.focus:shadow-outline-blue.focus:border-blue-300.sm:text-sm.sm:leading-5.ml-4
-   {:style     {:padding "0 0 0 12px"}
+  [options on-change class]
+  [:select.mt-1.block.px-3.text-base.leading-6.border-gray-300.focus:outline-none.focus:shadow-outline-blue.focus:border-blue-300.sm:text-sm.sm:leading-5.ml-4
+   {:class     (or class "form-select")
+    :style     {:padding "0 0 0 12px"}
     :on-change (fn [e]
                  (let [value (util/evalue e)]
                    (on-change value)))}
@@ -622,3 +635,46 @@
                 selected
                 (assoc :selected selected))
       label])])
+
+(rum/defcs tippy < rum/static
+  (rum/local false ::mounted?)
+  [state {:keys [fixed-position? open?] :as opts} child]
+  (let [*mounted? (::mounted? state)
+        mounted? @*mounted?
+        manual (not= open? nil)]
+    (Tippy (->
+            (merge {:arrow true
+                    :sticky true
+                    :theme "customized"
+                    :disabled (not (state/enable-tooltip?))
+                    :unmountHTMLWhenHide true
+                    :open (if manual open? @*mounted?)
+                    :trigger (if manual "manual" "mouseenter focus")
+                    ;; See https://github.com/tvkhoa/react-tippy/issues/13
+                    :popperOptions (if fixed-position?
+                                      {:modifiers {:flip {:enabled false}
+                                                   :hide {:enabled false}
+                                                   :preventOverflow {:enabled false}}}
+                                      {})
+                    :onShow #(reset! *mounted? true)
+                    :onHide #(reset! *mounted? false)}
+                   opts)
+            (assoc :html (if (or open? mounted?)
+                           (when-let [html (:html opts)]
+                             (if (fn? html)
+                               (html)
+                               [:div.pr-3.py-1
+                                html]))
+                           [:div {:key "tippy"} ""])))
+           child)))
+
+(defn slider
+  [default-value {:keys [min max on-change]}]
+  [:input.cursor-pointer
+   {:type  "range"
+    :value (int default-value)
+    :min   min
+    :max   max
+    :style {:width "100%"}
+    :on-change #(let [value (util/evalue %)]
+                  (on-change value))}])

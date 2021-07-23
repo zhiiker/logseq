@@ -1,7 +1,8 @@
 (ns frontend.components.lazy-editor
   (:require [rum.core :as rum]
             [shadow.lazy :as lazy]
-            [frontend.ui :as ui]))
+            [frontend.ui :as ui]
+            [frontend.state :as state]))
 
 (def lazy-editor (lazy/loadable frontend.extensions.code/editor))
 
@@ -13,8 +14,9 @@
                             (fn []
                               (reset! loaded? true)))
                  state)}
-  [config id attr code pos_meta]
-  (let [loaded? (rum/react loaded?)]
+  [config id attr code options]
+  (let [loaded? (rum/react loaded?)
+        theme (state/sub :ui/theme)]
     (if loaded?
-      (@lazy-editor config id attr code pos_meta)
+      (@lazy-editor config id attr code theme options)
       (ui/loading "CodeMirror"))))

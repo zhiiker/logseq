@@ -4,8 +4,13 @@
             [cljs.reader :as reader]
             [frontend.config :as config]
             [frontend.db :as db]
+            [frontend.fs :as fs]
+            [datascript.db :as ddb]
             [clojure.string :as string]
-            [promesa.core :as p]))
+            [promesa.core :as p]
+            [frontend.util :as util]
+            [frontend.date :as date]
+            [frontend.handler.common :as common-handler]))
 
 (def default-metadata-str "{}")
 
@@ -23,15 +28,58 @@
                            (println "Parsing metadata.edn failed: ")
                            (js/console.dir e)
                            {}))
-              ks (if (vector? k) k [k])
-              new-metadata (assoc-in metadata ks v)
+              new-metadata (cond
+                             (= k :block/properties)
+                             (update metadata :block/properties v) ; v should be a function
+                             :else
+                             (let [ks (if (vector? k) k [k])]
+                               (assoc-in metadata ks v)))
               new-metadata (if encrypted?
                              (assoc new-metadata :db/encrypted? true)
                              new-metadata)
               new-content (pr-str new-metadata)]
           (file-handler/set-file-content! repo path new-content))))))
 
+(defn set-pages-metadata!
+  [repo]
+  (let [path (config/get-pages-metadata-path)
+        all-pages (->> (db/get-all-pages repo)
+                       (common-handler/fix-pages-timestamps)
+                       (map #(select-keys % [:block/name :block/created-at :block/updated-at]))
+                       (vec))]
+    (-> (file-handler/create-pages-metadata-file repo)
+        (p/finally (fn []
+                     (let [new-content (pr-str all-pages)]
+                       (fs/write-file! repo
+                                       (config/get-repo-dir repo)
+                                       path
+                                       new-content
+                                       {})))))))
+
 (defn set-db-encrypted-secret!
   [encrypted-secret]
   (when-not (string/blank? encrypted-secret)
     (set-metadata! :db/encrypted-secret encrypted-secret)))
+
+(defn- handler-properties!
+  [all-properties properties-tx]
+  (reduce
+   (fn [acc datom]
+     (let [v (:v datom)
+           id (or (get v :id)
+                  (get v :title))]
+       (if id
+         (let [added? (ddb/datom-added datom)
+               remove-all-properties? (and (not added?)
+                                           ;; only id
+                                           (= 1 (count v)))]
+           (if remove-all-properties?
+             (dissoc acc id)
+             (assoc acc id v)))
+         acc)))
+   all-properties
+   properties-tx))
+
+(defn update-properties!
+  [properties-tx]
+  (set-metadata! :block/properties #(handler-properties! % properties-tx)))

@@ -1,6 +1,7 @@
 const colors = require('tailwindcss/colors')
 
 module.exports = {
+  mode: 'jit',
   purge: [
     './src/**/*.js',
     './src/**/*.cljs',
@@ -9,6 +10,12 @@ module.exports = {
   plugins: [require('@tailwindcss/ui')],
   darkMode: 'class',
   theme: {
+    extend: {
+      spacing: {
+        '128': '32rem',
+        '144': '36rem'
+      }
+    },
     colors: {
       transparent: 'transparent',
       current: 'currentColor',
@@ -33,6 +40,11 @@ module.exports = {
       yellow: colors.amber,
       orange: colors.orange,
       rose: colors.rose
+    },
+    extend: {
+      animation: {
+        'spin-reverse': 'spin 2s linear infinite reverse',
+      }
     }
   }
 }

@@ -3,21 +3,55 @@
   z-index: 0;
 
   &-lang {
-    @apply absolute top-0 right-0 p-1 text-sm;
+    @apply absolute right-0 p-1 text-sm;
+    top: 3px;
     z-index: 1;
-    background: white;
+    background: var(--ls-secondary-background-color);
+  }
+
+  &-calc {
+    @apply absolute right-0 text-sm;
+    padding: 0 0.25em;
+    top: 3px;
+    z-index: 1;
+    background: transparent;
+    width: max-content;
+    text-align: right;
+
+    &-output-line {
+      height: 23px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+
+      > span {
+          font-family: Fira Code, Monaco, Menlo, Consolas, 'COURIER NEW', monospace;
+      }
+    }
   }
 
   > .CodeMirror {
     z-index: 0;
     height: auto;
-    padding: 6px 0 0 0;
+    margin-top: 4px;
+    margin-bottom: 6px;
     font-family: Fira Code, Monaco, Menlo, Consolas, 'COURIER NEW', monospace;
-    max-width: 86vw;
+    max-width: var(--ls-main-content-max-width);
+    border-radius: 2px;
+    line-height: 1.45em;
+
     &:not(.CodeMirror-focused) {
       .CodeMirror-activeline-background {
-        background: unset;
+        background: unset !important;
       }
+    }
+
+    pre.CodeMirror-line {
+      box-shadow: none !important;
+    }
+
+    .CodeMirror-hscrollbar {
+        cursor: pointer;
     }
   }
 }

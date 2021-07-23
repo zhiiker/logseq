@@ -20,19 +20,29 @@
   (when-let [formatter-string (state/get-date-formatter)]
     (tf/unparse (tf/formatter formatter-string) date)))
 
-(def custom-formatter (tf/formatter "yyyy-MM-dd HH:mm:ssZ"))
+(def custom-formatter (tf/formatter "yyyy-MM-dd'T'HH:mm:ssZZ"))
 
 (defn journal-title-formatters
   []
   (conj
-   #{"MMM do, yyyy"
+   #{"do MMM yyyy"
+	   "do MMMM yyyy"
+     "MMM do, yyyy"
      "MMMM do, yyyy"
+     "E, dd-MM-yyyy"
+     "E, dd.MM.yyyy"
      "E, MM/dd/yyyy"
      "E, yyyy/MM/dd"
+     "EEE, dd-MM-yyyy"
+     "EEE, dd.MM.yyyy"
      "EEE, MM/dd/yyyy"
      "EEE, yyyy/MM/dd"
+     "EEEE, dd-MM-yyyy"
+     "EEEE, dd.MM.yyyy"
      "EEEE, MM/dd/yyyy"
      "EEEE, yyyy/MM/dd"
+     "dd-MM-yyyy"
+     "dd.MM.yyyy"
      "MM/dd/yyyy"
      "MM-dd-yyyy"
      "MM_dd_yyyy"
@@ -44,8 +54,24 @@
      "yyyy年MM月dd日"}
    (state/get-date-formatter)))
 
-(defn get-date-time-string [date-time]
-  (tf/unparse custom-formatter date-time))
+(defn get-date-time-string
+  ([]
+   (get-date-time-string (t/now)))
+  ([date-time]
+   (tf/unparse custom-formatter date-time)))
+
+(defn get-locale-string
+  [s]
+  (try
+    (->> (tf/parse (tf/formatters :date-time-no-ms) s)
+        (t/to-default-time-zone)
+        (tf/unparse (tf/formatter "MMM do, yyyy")))
+    (catch js/Error e
+      nil)))
+
+(defn ISO-string
+  []
+  (.toISOString (js/Date.)))
 
 (defn get-local-date-time-string
   []
@@ -170,6 +196,17 @@
     (let [journal-title (util/capitalize-all journal-title)]
       (journal-title-> journal-title #(util/parse-int (tf/unparse (tf/formatter "yyyyMMdd") %))))))
 
+(defn int->journal-title
+  [day]
+  (when day
+    (format (tf/parse (tf/formatter "yyyyMMdd") (str day)))))
+
+(defn journal-day->ts
+  [day]
+  (when day
+    (-> (tf/parse (tf/formatter "yyyyMMdd") (str day))
+        (tc/to-long))))
+
 (defn journal-title->long
   [journal-title]
   (journal-title-> journal-title #(tc/to-long %)))
@@ -190,6 +227,12 @@
 (defn int->local-time
   [n]
   (get-date-time-string (t/to-default-time-zone (tc/from-long n))))
+
+(defn int->local-time-2
+  [n]
+  (tf/unparse
+   (tf/formatter "yyyy-MM-dd HH:mm")
+   (t/to-default-time-zone (tc/from-long n))))
 
 (comment
   (def default-formatter (tf/formatter "MMM do, yyyy"))

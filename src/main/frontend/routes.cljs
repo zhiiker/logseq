@@ -4,11 +4,12 @@
             [frontend.components.file :as file]
             [frontend.components.page :as page]
             [frontend.components.diff :as diff]
+            [frontend.components.plugins :as plugins]
             [frontend.components.journal :as journal]
             [frontend.components.search :as search]
             [frontend.components.settings :as settings]
             [frontend.components.external :as external]
-            [frontend.components.publishing :as publishing]))
+            [frontend.components.shortcut :as shortcut]))
 
 ;; http://localhost:3000/#?anchor=fn.1
 (def routes
@@ -35,10 +36,6 @@
    ["/search/:q"
     {:name :search
      :view search/more}]
-
-   ["/new-page"
-    {:name :new-page
-     :view page/new}]
 
    ["/page/:name"
     {:name :page
@@ -68,6 +65,10 @@
     {:name :all-journals
      :view journal/all-journals}]
 
-   ["/my-publishing"
-    {:name :my-publishing
-     :view publishing/my-publishing}]])
+   ["/plugins"
+    {:name :plugins
+     :view plugins/installed-page}]
+
+   ["/helper/shortcut"
+    {:name :shortcut
+     :view shortcut/shortcut}]])

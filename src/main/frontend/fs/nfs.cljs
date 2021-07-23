@@ -57,7 +57,11 @@
 (defrecord Nfs []
   protocol/Fs
   (mkdir! [this dir]
-    (let [[root new-dir] (rest (string/split dir "/"))
+    (let [parts (->> (string/split dir "/")
+                     (remove string/blank?))
+          root (->> (butlast parts)
+                    (string/join "/"))
+          new-dir (last parts)
           root-handle (str "handle/" root)]
       (->
        (p/let [handle (idb/get-item root-handle)
@@ -82,12 +86,25 @@
             (map (fn [path]
                    (string/replace path prefix "")))))))
 
-  (unlink! [this path opts]
+  (unlink! [this repo path opts]
     (let [[dir basename] (util/get-dir-and-basename path)
           handle-path (str "handle" path)]
       (->
-       (p/let [handle (idb/get-item (str "handle" dir))
-               _ (idb/remove-item! handle-path)]
+       (p/let [recycle-dir (str "/" repo (util/format "/%s/%s" config/app-name config/recycle-dir))
+               _ (protocol/mkdir! this recycle-dir)
+               handle (idb/get-item handle-path)
+               file (.getFile handle)
+               content (.text file)
+               handle (idb/get-item (str "handle" dir))
+               _ (idb/remove-item! handle-path)
+               file-name (-> (string/replace path (str "/" repo "/") "")
+                             (string/replace "/" "_")
+                             (string/replace "\\" "_"))
+               new-path (str recycle-dir "/" file-name)
+               _ (protocol/write-file! this repo
+                                       "/"
+                                       new-path
+                                       content nil)]
          (when handle
            (.removeEntry ^js handle basename))
          (remove-nfs-file-handle! handle-path))
@@ -96,6 +113,7 @@
                                            :error error}))))))
 
   (rmdir! [this dir]
+    ;; TOO dangerious, we should never implement this
     nil)
 
   (read-file [this dir path options]
@@ -105,8 +123,7 @@
         (and local-file (.text local-file)))))
 
   (write-file! [this repo dir path content opts]
-    (let [{:keys [old-content]} opts
-          last-modified-at (db/get-file-last-modified-at repo path)
+    (let [last-modified-at (db/get-file-last-modified-at repo path)
           parts (string/split path "/")
           basename (last parts)
           sub-dir (->> (butlast parts)
@@ -119,62 +136,77 @@
           handle-path (if (= "/" (last sub-dir-handle-path))
                         (subs sub-dir-handle-path 0 (dec (count sub-dir-handle-path)))
                         sub-dir-handle-path)
+          handle-path (string/replace handle-path "//" "/")
           basename-handle-path (str handle-path "/" basename)]
       (p/let [file-handle (idb/get-item basename-handle-path)]
-        (when file-handle
-          (add-nfs-file-handle! basename-handle-path file-handle))
-        (if file-handle
-          (p/let [local-file (.getFile file-handle)
-                  local-content (.text local-file)
-                  local-last-modified-at (gobj/get local-file "lastModified")
-                  current-time (util/time-ms)
-                  new? (> current-time local-last-modified-at)
-                  new-created? (nil? last-modified-at)
-                  not-changed? (= last-modified-at local-last-modified-at)
-                  format (-> (util/get-file-ext path)
-                             (config/get-file-format))
-                  pending-writes (state/get-write-chan-length)
-                  draw? (and path (string/ends-with? path ".excalidraw"))]
-            (if (and local-content (or old-content
-                                       ;; temporally fix
-                                       draw?) new?
-                     (or
-                      draw?
-                      ;; Writing not finished
-                      (> pending-writes 0)
-                      ;; not changed by other editors
-                      not-changed?
-                      new-created?))
-              (do
-                (p/let [_ (verify-permission repo file-handle true)
-                        _ (utils/writeFile file-handle content)
-                        file (.getFile file-handle)]
-                  (when file
-                    (nfs-saved-handler repo path file))))
-              (do
-                (js/alert (str "The file has been modified on your local disk! File path: " path
-                               ", please save your changes and click the refresh button to reload it.")))))
-           ;; create file handle
-          (->
-           (p/let [handle (idb/get-item handle-path)]
-             (if handle
-               (p/let [_ (verify-permission repo handle true)
-                       file-handle (.getFileHandle ^js handle basename #js {:create true})
-                       ;; File exists if the file-handle has some content in it.
-                       file (.getFile file-handle)
-                       text (.text file)]
-                 (if (string/blank? text)
-                   (p/let [_ (idb/set-item! basename-handle-path file-handle)
+        ;; check file-handle available, remove it when got 'NotFoundError'
+        (p/let [test-get-file (when file-handle
+                                (p/catch (p/let [_ (.getFile file-handle)] true)
+                                         (fn [e]
+                                           (js/console.dir e)
+                                           (when (= "NotFoundError" (.-name e))
+                                             (idb/remove-item! basename-handle-path)
+                                             (remove-nfs-file-handle! basename-handle-path))
+                                           false)))
+                file-handle (if test-get-file file-handle nil)]
+
+          (when file-handle
+            (add-nfs-file-handle! basename-handle-path file-handle))
+          (if file-handle
+            (-> (p/let [local-file (.getFile file-handle)
+                        local-content (.text local-file)
+                        local-last-modified-at (gobj/get local-file "lastModified")
+                        current-time (util/time-ms)
+                        new? (> current-time local-last-modified-at)
+                        new-created? (nil? last-modified-at)
+                        not-changed? (= last-modified-at local-last-modified-at)
+                        format (-> (util/get-file-ext path)
+                                   (config/get-file-format))
+                        pending-writes (state/get-write-chan-length)
+                        draw? (and path (string/ends-with? path ".excalidraw"))
+                        config? (and path (string/ends-with? path "/config.edn"))]
+                  (p/let [_ (verify-permission repo file-handle true)
                           _ (utils/writeFile file-handle content)
                           file (.getFile file-handle)]
-                    (when file
-                      (nfs-saved-handler repo path file)))
-                   (notification/show! (str "The file " path " already exists, please save your changes and click the refresh button to reload it.")
-                    :warning)))
-               (println "Error: directory handle not exists: " handle-path)))
-           (p/catch (fn [error]
-                      (println "Write local file failed: " {:path path})
-                      (js/console.error error))))))))
+                    (if (and local-content new?
+                             (or
+                              draw?
+                              config?
+                             ;; Writing not finished
+                              (> pending-writes 0)
+                             ;; not changed by other editors
+                              not-changed?
+                              new-created?))
+                      (p/let [_ (verify-permission repo file-handle true)
+                              _ (utils/writeFile file-handle content)
+                              file (.getFile file-handle)]
+                        (when file
+                          (nfs-saved-handler repo path file)))
+                      (js/alert (str "The file has been modified on your local disk! File path: " path
+                                     ", please save your changes and click the refresh button to reload it.")))))
+                (p/catch (fn [e]
+                           (js/console.error e))))
+            ;; create file handle
+            (->
+             (p/let [handle (idb/get-item handle-path)]
+               (if handle
+                 (p/let [_ (verify-permission repo handle true)
+                         file-handle (.getFileHandle ^js handle basename #js {:create true})
+                         ;; File exists if the file-handle has some content in it.
+                         file (.getFile file-handle)
+                         text (.text file)]
+                   (if (string/blank? text)
+                     (p/let [_ (idb/set-item! basename-handle-path file-handle)
+                             _ (utils/writeFile file-handle content)
+                             file (.getFile file-handle)]
+                       (when file
+                         (nfs-saved-handler repo path file)))
+                     (notification/show! (str "The file " path " already exists, please save your changes and click the refresh button to reload it.")
+                                         :warning)))
+                 (println "Error: directory handle not exists: " handle-path)))
+             (p/catch (fn [error]
+                        (println "Write local file failed: " {:path path})
+                        (js/console.error error)))))))))
 
   (rename! [this repo old-path new-path]
     (p/let [[dir basename] (util/get-dir-and-basename old-path)
@@ -188,7 +220,7 @@
             file (.getFile handle)
             content (.text file)
             _ (protocol/write-file! this repo dir new-path content nil)]
-      (protocol/unlink! this old-path nil)))
+      (protocol/unlink! this repo old-path nil)))
   (stat [this dir path]
     (if-let [file (get-nfs-file-handle (str "handle/"
                                             (string/replace-first dir "/" "")

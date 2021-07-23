@@ -1,9 +1,13 @@
 (ns frontend.db.default
   (:require [clojure.string :as string]))
 
+(defonce built-in-pages-names
+  #{"NOW" "LATER" "DOING" "DONE" "IN-PROGRESS" "TODO" "WAIT" "WAITING" "A" "B" "C"})
+
 (def built-in-pages
   (mapv (fn [p]
-          {:page/name (string/lower-case p)
-           :page/original-name p
-           :page/journal? false})
-        #{"NOW" "LATER" "DOING" "DONE" "IN-PROGRESS" "TODO" "WAIT" "WAITING" "A" "B" "C"}))
+          {:block/name (string/lower-case p)
+           :block/original-name p
+           :block/journal? false
+           :block/uuid (random-uuid)})
+        built-in-pages-names))

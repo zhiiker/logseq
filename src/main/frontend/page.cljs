@@ -3,6 +3,7 @@
             [frontend.state :as state]
             [frontend.ui :as ui]
             [frontend.components.sidebar :as sidebar]
+            [frontend.handler.plugin :as plugin-handler]
             [frontend.context.i18n :as i18n]))
 
 (rum/defc route-view
@@ -15,7 +16,10 @@
                    (state/setup-electron-updater!)
                    (ui/inject-document-devices-envs!)
                    (ui/inject-dynamic-style-node!)
-                   (let [teardown-fn (comp (ui/setup-patch-ios-fixed-bottom-position!))]
+                   (plugin-handler/host-mounted!)
+                   (let [td-fns [(ui/setup-active-keystroke!)
+                                 (ui/setup-active-keystroke!)]
+                         teardown-fn #(mapv (fn [f] (f)) td-fns)]
                      (assoc state ::teardown teardown-fn)))
    :will-unmount (fn [state]
                    (let [teardown (::teardown state)]
@@ -30,7 +34,7 @@
            (view route-match)
            (sidebar/sidebar
             route-match
-            (view route-match)))
+            (view route-match))))))))
 
         ;; FIXME: disable for now
         ;; (let [route-name (get-in route-match [:data :name])
@@ -49,4 +53,4 @@
         ;;           :timeout {:enter 300
         ;;                     :exit 200}}
         ;;          (route-view view route-match)))))))
-         )))))
+

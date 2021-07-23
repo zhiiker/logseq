@@ -13,14 +13,15 @@
             [frontend.state :as state]
             [clojure.string :as string]
             [clojure.set :as set]
-            [frontend.ui :as ui]
             [frontend.fs :as fs]
             [frontend.fs.nfs :as nfs]
             [frontend.db :as db]
             [frontend.db.model :as db-model]
             [frontend.config :as config]
             [lambdaisland.glogi :as log]
-            [frontend.encrypt :as encrypt]))
+            [frontend.encrypt :as encrypt]
+            [frontend.search :as search]
+            [frontend.storage :as storage]))
 
 (defn remove-ignore-files
   [files]
@@ -41,27 +42,29 @@
 
 (defn- ->db-files
   [electron? dir-name result]
-  (if electron?
-    (map (fn [{:keys [path stat content]}]
-           (let [{:keys [mtime size]} stat]
-             {:file/path             path
-              :file/last-modified-at mtime
-              :file/size             size
-              :file/content content}))
-         result)
-    (let [result (flatten (bean/->clj result))]
-      (map (fn [file]
-             (let [handle (gobj/get file "handle")
-                   get-attr #(gobj/get file %)
-                   path (-> (get-attr "webkitRelativePath")
-                            (string/replace-first (str dir-name "/") ""))]
-               {:file/name             (get-attr "name")
-                :file/path             path
-                :file/last-modified-at (get-attr "lastModified")
-                :file/size             (get-attr "size")
-                :file/type             (get-attr "type")
-                :file/file             file
-                :file/handle           handle})) result))))
+  (->>
+   (if electron?
+     (map (fn [{:keys [path stat content]}]
+            (let [{:keys [mtime size]} stat]
+              {:file/path             path
+               :file/last-modified-at mtime
+               :file/size             size
+               :file/content content}))
+       result)
+     (let [result (flatten (bean/->clj result))]
+       (map (fn [file]
+              (let [handle (gobj/get file "handle")
+                    get-attr #(gobj/get file %)
+                    path (-> (get-attr "webkitRelativePath")
+                             (string/replace-first (str dir-name "/") ""))]
+                {:file/name             (get-attr "name")
+                 :file/path             path
+                 :file/last-modified-at (get-attr "lastModified")
+                 :file/size             (get-attr "size")
+                 :file/type             (get-attr "type")
+                 :file/file             file
+                 :file/handle           handle})) result)))
+   (sort-by :file/path)))
 
 (defn- filter-markup-and-built-in-files
   [files]
@@ -135,8 +138,8 @@
                                                          (let [last-part (last (string/split path "/"))]
                                                            (contains? #{config/app-name
                                                                         config/default-draw-directory
-                                                                        config/default-journals-directory
-                                                                        config/default-pages-directory}
+                                                                        (config/get-journals-directory)
+                                                                        (config/get-pages-directory)}
                                                                       last-part)))))
                                               (into {})))))
 
@@ -159,37 +162,15 @@
                        (state/set-loading-files! false)
                        (and ok-handler (ok-handler))
                        (when (util/electron?)
-                         (fs/watch-dir! dir-name)))))
+                         (fs/watch-dir! dir-name))
+                       (state/pub-event! [:graph/added repo]))))
            (p/catch (fn [error]
-                      (log/error :nfs/load-files-error error)))))
+                      (log/error :nfs/load-files-error repo)
+                      (log/error :exception error)))))
      (p/catch (fn [error]
                 (if (contains? #{"AbortError" "Error"} (gobj/get error "name"))
                   (state/set-loading-files! false)
                   (log/error :nfs/open-dir-error error)))))))
-
-(defn get-local-repo
-  []
-  (when-let [repo (state/get-current-repo)]
-    (when (config/local-db? repo)
-      repo)))
-
-(defn ask-permission
-  [repo]
-  (when-not (util/electron?)
-    (fn [close-fn]
-      [:div
-       [:p
-        "Grant native filesystem permission for directory: "
-        [:b (config/get-local-dir repo)]]
-       (ui/button
-        "Grant"
-        :on-click (fn []
-                    (nfs/check-directory-permission! repo)
-                    (close-fn)))])))
-
-(defn ask-permission-if-local? []
-  (when-let [repo (get-local-repo)]
-    (state/set-modal! (ask-permission repo))))
 
 (defn- compute-diffs
   [old-files new-files]
@@ -299,28 +280,36 @@
                         (set-files! @path-handles))]
               (handle-diffs! repo nfs? old-files new-files handle-path path-handles re-index?))))
         (p/catch (fn [error]
-                   (log/error :nfs/load-files-error error)))
+                   (log/error :nfs/load-files-error repo)
+                   (log/error :exception error)))
         (p/finally (fn [_]
                      (state/set-graph-syncing? false))))))))
-
-(defn refresh!
-  [repo ok-handler]
-  (when repo
-    (state/set-nfs-refreshing! true)
-    (p/let [_ (reload-dir! repo)
-            _ (ok-handler)]
-      (state/set-nfs-refreshing! false))))
 
 (defn rebuild-index!
   [repo ok-handler]
   (when repo
     (state/set-nfs-refreshing! true)
-
-    ;; TODO: What about other relationships?
-    (db-model/remove-all-aliases! repo)
+    (search/reset-indice! repo)
+    (db/remove-conn! repo)
+    (db/clear-query-state!)
+    (db/start-db-conn! (state/get-me) repo)
     (p/let [_ (reload-dir! repo true)
             _ (ok-handler)]
       (state/set-nfs-refreshing! false))))
+
+(defn refactored-version?
+  []
+  (:block/name (storage/get :db-schema)))
+
+(defn refresh!
+  [repo ok-handler]
+  (if (refactored-version?)
+    (when repo
+      (state/set-nfs-refreshing! true)
+      (p/let [_ (reload-dir! repo)
+              _ (ok-handler)]
+        (state/set-nfs-refreshing! false)))
+    (rebuild-index! repo ok-handler)))
 
 (defn supported?
   []

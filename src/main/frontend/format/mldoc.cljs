@@ -1,53 +1,78 @@
 (ns frontend.format.mldoc
-  (:require [frontend.format.protocol :as protocol]
-            [frontend.util :as util]
+  (:require [cljs-bean.core :as bean]
+            [cljs.core.match :refer [match]]
             [clojure.string :as string]
-            [cljs-bean.core :as bean]
-            [cljs.core.match :refer-macros [match]]
-            [lambdaisland.glogi :as log]
-            [goog.object :as gobj]
+            [frontend.format.protocol :as protocol]
             [frontend.text :as text]
+            [frontend.utf8 :as utf8]
+            [frontend.util :as util]
+            [goog.object :as gobj]
+            [lambdaisland.glogi :as log]
+            [medley.core :as medley]
             ["mldoc" :as mldoc :refer [Mldoc]]
-            [medley.core :as medley]))
+            [linked.core :as linked]))
 
 (defonce parseJson (gobj/get Mldoc "parseJson"))
 (defonce parseInlineJson (gobj/get Mldoc "parseInlineJson"))
-(defonce parseHtml (gobj/get Mldoc "parseHtml"))
+(defonce parseOPML (gobj/get Mldoc "parseOPML"))
+(defonce exportToHtml (gobj/get Mldoc "exportToHtml"))
 (defonce anchorLink (gobj/get Mldoc "anchorLink"))
 (defonce parseAndExportMarkdown (gobj/get Mldoc "parseAndExportMarkdown"))
+(defonce parseAndExportOPML (gobj/get Mldoc "parseAndExportOPML"))
+(defonce astExportMarkdown (gobj/get Mldoc "astExportMarkdown"))
 
 (defn default-config
   ([format]
-   (default-config format false))
-  ([format export-heading-to-list?]
+   (default-config format {:export-heading-to-list? false}))
+  ([format {:keys [export-heading-to-list? export-keep-properties? export-md-indent-style]}]
    (let [format (string/capitalize (name (or format :markdown)))]
-     (js/JSON.stringify
-      (bean/->js
-       {:toc false
-        :heading_number false
-        :keep_line_break true
-        :format format
-        :heading_to_list export-heading-to-list?})))))
+     (->> {:toc false
+           :heading_number false
+           :keep_line_break true
+           :format format
+           :heading_to_list (or export-heading-to-list? false)
+           :exporting_keep_properties export-keep-properties?
+           :export_md_indent_style export-md-indent-style}
+          (filter #(not(nil? (second %))))
+          (into {})
+          (bean/->js)
+          (js/JSON.stringify)))))
 
 (def default-references
   (js/JSON.stringify
    (clj->js {:embed_blocks []
-             :embed_pages []
-             :refer_blocks []})))
+             :embed_pages []})))
 
 (defn parse-json
   [content config]
-  (parseJson content (or config default-config)))
+  (parseJson content config))
 
 (defn inline-parse-json
   [text config]
-  (parseInlineJson text (or config default-config)))
+  (parseInlineJson text config))
+
+(defn parse-opml
+  [content]
+  (parseOPML content))
 
 (defn parse-export-markdown
   [content config references]
   (parseAndExportMarkdown content
-                          (or config default-config)
+                          config
                           (or references default-references)))
+
+(defn parse-export-opml
+  [content config title references]
+  (parseAndExportOPML content
+                      config
+                      title
+                      (or references default-references)))
+
+(defn ast-export-markdown
+  [ast config references]
+  (astExportMarkdown ast
+                     config
+                     (or references default-references)))
 
 ;; Org-roam
 (defn get-tags-from-definition
@@ -101,18 +126,22 @@
           directive?
           (fn [[item _]] (= "directive" (string/lower-case (first item))))
           grouped-ast (group-by directive? original-ast)
-          [directive-ast other-ast]
-          [(get grouped-ast true) (get grouped-ast false)]
-          properties (->> (map first directive-ast)
-                          (map (fn [[_ k v]]
-                                 (let [k (keyword (string/lower-case k))
-                                       comma? (contains? #{:tags :alias :roam_tags} k)
-                                       v (if (contains? #{:title :description :roam_tags} k)
-                                           v
-                                           (text/split-page-refs-without-brackets v comma?))]
-                                   [k v])))
-                          (reverse)
-                          (into {}))
+          directive-ast (get grouped-ast true)
+          [properties-ast other-ast] (if (= "Property_Drawer" (ffirst ast))
+                                       [(last (first ast))
+                                        (rest original-ast)]
+                                       [(->> (map first directive-ast)
+                                             (map rest))
+                                        (get grouped-ast false)])
+          properties (->>
+                      properties-ast
+                      (map (fn [[k v]]
+                             (let [k (keyword (string/lower-case k))
+                                   v (if (contains? #{:title :description :filters :roam_tags} k)
+                                       v
+                                       (text/split-page-refs-without-brackets v))]
+                               [k v]))))
+          properties (into (linked/map) properties)
           macro-properties (filter (fn [x] (= :macro (first x))) properties)
           macros (if (seq macro-properties)
                    (->>
@@ -126,7 +155,7 @@
                     (into {}))
                    {})
           properties (->> (remove (fn [x] (= :macro (first x))) properties)
-                          (into {}))
+                          (into (linked/map)))
           properties (if (seq properties)
                        (cond-> properties
                          (:roam_key properties)
@@ -161,6 +190,28 @@
         original-ast))
     ast))
 
+(defn update-src-full-content
+  [ast content]
+  (let [content (utf8/encode content)]
+    (map (fn [[block pos-meta]]
+          (if (and (vector? block)
+                   (= "Src" (first block)))
+            (let [{:keys [start_pos end_pos]} pos-meta
+                  content (utf8/substring content start_pos end_pos)
+                  spaces (re-find #"^[\t ]+" (first (string/split-lines content)))
+                  content (if spaces (text/remove-indentation-spaces content (count spaces) true)
+                              content)
+                  block ["Src" (assoc (second block) :full_content content)]]
+              [block pos-meta])
+            [block pos-meta])) ast)))
+
+(defn block-with-title?
+  [type]
+  (contains? #{"Paragraph"
+               "Raw_Html"
+               "Hiccup"
+               "Heading"} type))
+
 (defn ->edn
   [content config]
   (try
@@ -169,7 +220,19 @@
       (-> content
           (parse-json config)
           (util/json->clj)
+          (update-src-full-content content)
           (collect-page-properties)))
+    (catch js/Error e
+      (log/error :edn/convert-failed e)
+      [])))
+
+(defn opml->edn
+  [content]
+  (try
+    (if (string/blank? content)
+      {}
+      (let [[headers blocks] (-> content (parse-opml) (util/json->clj))]
+        [headers (collect-page-properties blocks)]))
     (catch js/Error e
       (log/error :edn/convert-failed e)
       [])))
@@ -190,28 +253,16 @@
   (toEdn [this content config]
     (->edn content config))
   (toHtml [this content config]
-    (parseHtml content config))
+    (exportToHtml content config))
   (loaded? [this]
     true)
   (lazyLoad [this ok-handler]
     true)
   (exportMarkdown [this content config references]
     (parse-export-markdown content config references))
-  )
+  (exportOPML [this content config title references]
+    (parse-export-opml content config title references)))
 
 (defn plain->text
   [plains]
   (string/join (map last plains)))
-
-(defn parse-properties
-  [content format]
-  (let [ast (->> (->edn content
-                        (default-config format))
-                 (map first))
-        properties (collect-page-properties ast)
-        properties (let [properties (and (seq ast)
-                                         (= "Properties" (ffirst ast))
-                                         (last (first ast)))]
-                     (if (and properties (seq properties))
-                       properties))]
-    (into {} properties)))

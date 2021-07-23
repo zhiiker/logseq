@@ -7,7 +7,7 @@
             [promesa.core :as p]
             ["fs-extra" :as fs]
             ["path" :as path]
-            ["electron" :refer [BrowserWindow app protocol ipcMain dialog] :as electron]
+            ["electron" :refer [BrowserWindow app protocol ipcMain dialog Menu MenuItem] :as electron]
             ["electron-window-state" :as windowStateKeeper]
             [clojure.core.async :as async]
             [electron.state :as state]))
@@ -26,18 +26,22 @@
   []
   (let [win-state (windowStateKeeper (clj->js {:defaultWidth 980 :defaultHeight 700}))
         win-opts (cond->
-                   {:width         (.-width win-state)
-                    :height        (.-height win-state)
-                    :frame         (not mac?)
-                    :autoHideMenuBar (not mac?)
-                    :titleBarStyle (if mac? "hidden" nil)
-                    :webPreferences
-                    {:plugins                 true ; pdf
-                     :nodeIntegration         false
-                     :nodeIntegrationInWorker false
-                     :contextIsolation        true
-                     :spellcheck              true
-                     :preload                 (path/join js/__dirname "js/preload.js")}}
+                  {:width         (.-width win-state)
+                   :height        (.-height win-state)
+                   :frame         true
+                   :titleBarStyle "hiddenInset"
+                   :trafficLightPosition {:x 16 :y 16}
+                   :autoHideMenuBar (not mac?)
+                   :webPreferences
+                   {:plugins                 true ; pdf
+                    :nodeIntegration         false
+                    :nodeIntegrationInWorker false
+                    :contextIsolation        true
+                    :spellcheck              true
+                    ;; Remove OverlayScrollbars and transition `.scrollbar-spacing`
+                    ;; to use `scollbar-gutter` after the feature is implemented in browsers.
+                    :enableBlinkFeatures     'OverlayScrollbars'
+                    :preload                 (path/join js/__dirname "js/preload.js")}}
                    linux?
                    (assoc :icon (path/join js/__dirname "icons/logseq.png")))
         url MAIN_WINDOW_ENTRY
@@ -64,25 +68,35 @@
        (callback #js {:path path}))))
   #(.unregisterProtocol protocol "assets"))
 
-(defn- handle-export-publish-assets [_event html custom-css-path]
+(defn- handle-export-publish-assets [_event html custom-css-path repo-path asset-filenames]
   (let [app-path (. app getAppPath)
+        asset-filenames (js->clj asset-filenames)
         paths (js->clj (. dialog showOpenDialogSync (clj->js {:properties ["openDirectory" "createDirectory" "promptToCreate", "multiSelections"]})))]
     (when (seq paths)
       (let [root-dir (first paths)
             static-dir (path/join root-dir "static")
+            assets-from-dir (path/join repo-path "assets")
+            assets-to-dir (path/join root-dir "assets")
             index-html-path (path/join root-dir "index.html")]
         (p/let [_ (. fs ensureDir static-dir)
+                _ (. fs ensureDir assets-to-dir)
                 _ (p/all  (concat
                            [(. fs writeFile index-html-path html)
 
+
                             (. fs copy (path/join app-path "404.html") (path/join root-dir "404.html"))]
+
+                           (map
+                            (fn [filename] (. fs copy (path/join assets-from-dir filename) (path/join assets-to-dir filename)))
+
+                            asset-filenames)
 
                            (map
                             (fn [part]
                               (. fs copy (path/join app-path part) (path/join static-dir part)))
                             ["css" "fonts" "icons" "img" "js"])))
                 custom-css (. fs readFile custom-css-path)
-                _ (. fs appendFile (path/join static-dir "css" "style.css") custom-css)
+                _ (. fs writeFile (path/join static-dir "css" "custom.css") custom-css)
                 js-files ["main.js" "code-editor.js" "excalidraw.js"]
                 _ (p/all (map (fn [file]
                                 (. fs removeSync (path/join static-dir "js" file)))
@@ -98,7 +112,7 @@
                 _ (p/all (map (fn [file]
                                 (. fs removeSync (path/join static-dir "js" (str file ".map"))))
                               ["main.js" "code-editor.js" "excalidraw.js" "age-encryption.js"]))]
-          (. dialog showMessageBox (clj->js {:message (str "Export publish assets to " root-dir " successfully")})))))))
+          (. dialog showMessageBox (clj->js {:message (str "Export public pages and publish assets to " root-dir " successfully")})))))))
 
 (defn setup-app-manager!
   [^js win]
@@ -126,6 +140,30 @@
                    (js-invoke app type args)
                    (catch js/Error e
                      (js/console.error e))))))
+
+
+    (.on web-contents "context-menu"
+         (fn
+           [_event params]
+           (let [menu (Menu.)
+                 suggestions (.-dictionarySuggestions ^js params)]
+
+             (doseq [suggestion suggestions]
+               (. menu append
+                  (MenuItem. (clj->js {:label
+                                       suggestion
+                                       :click
+                                       (fn [] (. web-contents replaceMisspelling suggestion))}))))
+
+             (when-let [misspelled-word (.-misspelledWord ^js params)]
+               (. menu append
+                  (MenuItem. (clj->js {:label
+                                       "Add to dictionary"
+                                       :click
+                                       (fn [] (.. web-contents -session (addWordToSpellCheckerDictionary misspelled-word)))}))))
+
+             (. menu popup))))
+
 
     (.on web-contents  "new-window"
          (fn [e url]
@@ -173,7 +211,11 @@
                    *quitting? (atom false)]
                (.. logger (info (str "Logseq App(" (.getVersion app) ") Starting... ")))
 
+               (when (search/version-changed?)
+                 (search/rm-search-dir!))
+
                (search/ensure-search-dir!)
+
                (search/open-dbs!)
 
                (vreset! *setup-fn

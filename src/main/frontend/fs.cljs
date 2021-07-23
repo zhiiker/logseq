@@ -1,17 +1,17 @@
 (ns frontend.fs
-  (:require [frontend.util :as util :refer-macros [profile]]
-            [frontend.config :as config]
+  (:require [cljs-bean.core :as bean]
             [clojure.string :as string]
-            [promesa.core :as p]
-            [lambdaisland.glogi :as log]
-            [frontend.fs.protocol :as protocol]
-            [frontend.fs.nfs :as nfs]
-            [frontend.fs.bfs :as bfs]
-            [frontend.fs.node :as node]
+            [frontend.config :as config]
             [frontend.db :as db]
-            [cljs-bean.core :as bean]
+            [frontend.encrypt :as encrypt]
+            [frontend.fs.bfs :as bfs]
+            [frontend.fs.nfs :as nfs]
+            [frontend.fs.node :as node]
+            [frontend.fs.protocol :as protocol]
             [frontend.state :as state]
-            [frontend.encrypt :as encrypt]))
+            [frontend.util :as util]
+            [lambdaisland.glogi :as log]
+            [promesa.core :as p]))
 
 (defonce nfs-record (nfs/->Nfs))
 (defonce bfs-record (bfs/->Bfs))
@@ -43,38 +43,45 @@
   [dir]
   (protocol/mkdir! (get-fs dir) dir))
 
+(defn mkdir-recur!
+  [dir]
+  (protocol/mkdir-recur! (get-fs dir) dir))
+
 (defn readdir
   [dir]
   (protocol/readdir (get-fs dir) dir))
 
 (defn unlink!
-  [path opts]
-  (protocol/unlink! (get-fs path) path opts))
+  "Should move the path to logseq/recycle instead of deleting it."
+  [repo path opts]
+  (protocol/unlink! (get-fs path) repo path opts))
 
 (defn rmdir!
   "Remove the directory recursively.
    Warning: only run it for browser cache."
   [dir]
-  (protocol/rmdir! (get-fs dir) dir))
+  (when-let [fs (get-fs dir)]
+    (when (= fs bfs-record)
+      (protocol/rmdir! fs dir))))
 
 (defn write-file!
   [repo dir path content opts]
   (when content
     (let [fs-record (get-fs dir)]
-      (p/let [metadata-or-css? (or (string/ends-with? path config/metadata-file)
-                                  (string/ends-with? path config/custom-css-file))
-             content (if metadata-or-css? content (encrypt/encrypt content))]
-       (->
-        (p/let [_ (protocol/write-file! (get-fs dir) repo dir path content opts)]
-          (when (= bfs-record fs-record)
-            (db/set-file-last-modified-at! repo (config/get-file-path repo path) (js/Date.))))
-        (p/catch (fn [error]
-                   (log/error :file/write-failed {:dir dir
-                                                  :path path
-                                                  :error error})
-                   ;; Disable this temporarily
-                   ;; (js/alert "Current file can't be saved! Please copy its content to your local file system and click the refresh button.")
-                   )))))))
+      (p/let [metadata-or-css? (or (string/ends-with? path (str "/" config/metadata-file))
+                                   (string/ends-with? path (str "/" config/custom-css-file)))
+              content (if metadata-or-css? content (encrypt/encrypt content))]
+        (->
+         (p/let [_ (protocol/write-file! (get-fs dir) repo dir path content opts)]
+           (when (= bfs-record fs-record)
+             (db/set-file-last-modified-at! repo (config/get-file-path repo path) (js/Date.))))
+         (p/catch (fn [error]
+                    (log/error :file/write-failed {:dir dir
+                                                   :path path
+                                                   :error error})
+                    ;; Disable this temporarily
+                    ;; (js/alert "Current file can't be saved! Please copy its content to your local file system and click the refresh button.")
+                    )))))))
 
 (defn read-file
   ([dir path]
@@ -90,7 +97,7 @@
 (defn rename!
   [repo old-path new-path]
   (cond
-    ; See https://github.com/isomorphic-git/lightning-fs/issues/41
+                                        ; See https://github.com/isomorphic-git/lightning-fs/issues/41
     (= old-path new-path)
     (p/resolved nil)
 
@@ -138,16 +145,17 @@
   ([repo dir path]
    (create-if-not-exists repo dir path ""))
   ([repo dir path initial-content]
-   (let [path (if (util/starts-with? path "/")
-                path
-                (str "/" path))]
+   (let [path (if (util/absolute-path? path) path
+                  (if (util/starts-with? path "/")
+                    path
+                    (str "/" path)))]
      (->
       (p/let [stat (stat dir path)]
         true)
       (p/catch
-       (fn [_error]
-         (p/let [_ (write-file! repo dir path initial-content nil)]
-           false)))))))
+          (fn [_error]
+            (p/let [_ (write-file! repo dir path initial-content nil)]
+              false)))))))
 
 (defn file-exists?
   [dir path]

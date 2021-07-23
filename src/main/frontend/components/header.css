@@ -1,7 +1,8 @@
 .cp__header {
   @apply shadow z-10 h-12;
+  -webkit-app-region: drag;
 
-  padding-right: 1rem;
+  padding: 0 0.5rem;
   display: flex;
   align-items: center;
   flex: 0 0 auto;
@@ -13,6 +14,7 @@
   right: 0;
   user-select: none;
   transition: width 0.3s;
+  line-height: 1;
 
   .it svg {
     transform: scale(0.8);
@@ -25,6 +27,30 @@
       min-width: 14rem;
     }
   }
+
+  a.button {
+    margin: 0 4px;
+  }
+}
+
+.is-electron.is-mac .cp__header {
+    padding-left: 78px;
+    -moz-transition: padding-left .3s ease-in;
+    -o-transition: padding-left  .3s ease-in;
+    -webkit-transition: padding-left  .3s ease-in;
+    transition: padding-left  .3s ease-in;
+}
+
+.cp__header .navigation svg {
+    transform: scale(0.7);
+}
+
+.is-electron.is-mac.is-fullscreen .cp__header {
+    padding-left: 0;
+}
+
+.cp__header a, .cp__header svg {
+    -webkit-app-region: no-drag;
 }
 
 .cp__header-left-menu {
@@ -41,35 +67,20 @@
 }
 
 .cp__header-logo {
-  @apply px-4 mr-3;
-  height: 100%;
-}
-
-.cp__header-logo,
-.cp__right-menu-button {
-  opacity: 0.3;
+  @apply p-2;
 }
 
 .cp__header-logo {
   display: none;
 }
 
-.cp__header-logo:hover,
-.cp__right-menu-button:hover {
+.cp__header-logo:hover {
   opacity: 1;
 }
 
 .cp__header-logo-img {
   width: 24px;
   height: 24px;
-}
-
-.cp__right-menu-button {
-  @apply ml-3;
-}
-
-.cp__right-menu-button {
-  display: block;
 }
 
 @screen sm {
@@ -82,9 +93,12 @@
   }
 
   .cp__header-logo {
-    display: flex;
-    align-items: center;
+    display: block;
   }
+}
+
+.cp__header-logo svg {
+    transform: scale(0.9);
 }
 
 #repo-name {
@@ -95,4 +109,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 7ch;
+  color: var(--ls-icon-color, #045591);
+}
+
+a.button {
+    padding: 0.25rem;
+    opacity: 0.6;
+    display: block;
+    border-radius: 4px;
+}
+
+a.button:hover {
+    opacity: 1;
+    background: var(--ls-tertiary-background-color);
+}
+
+.is-mac.is-electron :is(.cp__header, .cp__right-sidebar-topbar) :is(button, .button, a) {
+    cursor: default !important;
 }

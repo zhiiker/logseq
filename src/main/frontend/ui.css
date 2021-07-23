@@ -1,6 +1,5 @@
 #ui__ac {
   &-inner {
-    max-height: 400px;
     overflow-x: hidden;
     overflow-y: auto;
     position: relative;
@@ -12,8 +11,13 @@
   }
 }
 
+.ui__ac-group-name {
+  @apply p-2 text-xs;
+  color: var(--ls-block-ref-link-text-color);
+}
+
 .search-all #ui__ac-inner {
-    max-height: none;
+  max-height: none;
 }
 
 .ui__notifications {
@@ -57,9 +61,13 @@
 }
 
 .ui__modal {
-  @apply fixed bottom-0 inset-x-0
-  sm:inset-0 sm:flex sm:items-center sm:justify-center
-  px-4 pb-4;
+  @apply fixed bottom-0 inset-x-0 px-4 pb-4;
+
+  @screen sm {
+    & {
+      @apply inset-0 flex items-center justify-center;
+    }
+  }
 
   &-overlay {
     @apply fixed inset-0 transition-opacity;
@@ -77,7 +85,7 @@
 
     .panel-content {
       overflow-y: auto;
-      max-height: 80vh;
+      max-height: 85vh;
       max-width: 768px;
       padding: 2rem;
     }
@@ -103,6 +111,13 @@
   }
 }
 
+@media (min-width: 1024px) {
+    .panel-content .ls-card {
+        min-width: 32rem;
+        min-height: 24rem;
+    }
+}
+
 .ui__button {
   @apply inline-flex items-center px-3 py-2 border border-transparent
   text-sm leading-4 font-medium rounded-md text-white
@@ -125,6 +140,10 @@
     &:hover {
       color: var(--ls-link-text-color);
     }
+  }
+
+  &.p-1 {
+    padding: 0.25rem 0.5rem !important;
   }
 }
 
@@ -174,4 +193,12 @@
   &.is-small {
     @apply py-1.5 sm:leading-4 sm:text-xs;
   }
+}
+
+.rotating-arrow.not-collapsed svg {
+  transform: rotate(90deg);
+}
+
+.rotating-arrow svg {
+  transition: all 100ms ease-in 0ms;
 }

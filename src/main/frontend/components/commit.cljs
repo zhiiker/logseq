@@ -1,6 +1,8 @@
 (ns frontend.components.commit
   (:require [rum.core :as rum]
-            [frontend.util :as util :refer-macros [profile]]
+            [frontend.util :as util :refer [profile]]
+            [frontend.util.cursor :as cursor]
+            [clojure.string :as string]
             [frontend.handler.repo :as repo-handler]
             [frontend.state :as state]
             [frontend.mixins :as mixins]
@@ -22,7 +24,7 @@
   {:did-update (fn [state]
                  (when-let [input (gdom/getElement "commit-message")]
                    (.focus input)
-                   (util/move-cursor-to-end input))
+                   (cursor/move-cursor-to-end input))
                  state)}
   (mixins/event-mixin
    (fn [state]
@@ -53,3 +55,16 @@
         {:type "button"
          :on-click close-fn}
         "Cancel"]]]]))
+
+(defn show-commit-modal! [e]
+  (when (and
+         (string/starts-with? (state/get-current-repo) "https://")
+         (not (util/input? (gobj/get e "target")))
+         (not (gobj/get e "shiftKey"))
+         (not (gobj/get e "ctrlKey"))
+         (not (gobj/get e "altKey"))
+         (not (gobj/get e "metaKey")))
+    (when-let [repo-url (state/get-current-repo)]
+      (when-not (state/get-edit-input-id)
+        (util/stop e)
+        (state/set-modal! commit-and-push!)))))

@@ -1,31 +1,44 @@
 (ns frontend.handler
-  (:require [frontend.state :as state]
+  (:require [cljs-bean.core :as bean]
+            [electron.ipc :as ipc]
+            [electron.listener :as el]
+            [frontend.components.editor :as editor]
+            [frontend.components.page :as page]
+            [frontend.config :as config]
             [frontend.db :as db]
             [frontend.db-schema :as db-schema]
-            [frontend.util :as util :refer-macros [profile]]
-            [frontend.config :as config]
-            [frontend.storage :as storage]
-            [clojure.string :as string]
-            [promesa.core :as p]
-            [cljs-bean.core :as bean]
-            [frontend.date :as date]
-            [frontend.search :as search]
-            [frontend.search.db :as search-db]
+            [frontend.handler.common :as common-handler]
+            [frontend.handler.events :as events]
+            [frontend.handler.file :as file-handler]
             [frontend.handler.notification :as notification]
             [frontend.handler.page :as page-handler]
             [frontend.handler.repo :as repo-handler]
-            [frontend.handler.file :as file-handler]
-            [frontend.handler.editor :as editor-handler]
             [frontend.handler.ui :as ui-handler]
-            [frontend.handler.web.nfs :as nfs]
-            [frontend.fs.watcher-handler :as fs-watcher-handler]
-            [frontend.ui :as ui]
-            [goog.object :as gobj]
             [frontend.idb :as idb]
+            [frontend.modules.instrumentation.core :as instrument]
+            [frontend.modules.shortcut.core :as shortcut]
+            [frontend.search :as search]
+            [frontend.search.db :as search-db]
+            [frontend.state :as state]
+            [frontend.storage :as storage]
+            [frontend.util :as util]
+            [frontend.version :as version]
+            [goog.object :as gobj]
             [lambdaisland.glogi :as log]
-            [frontend.handler.common :as common-handler]
-            [electron.listener :as el]
-            [frontend.version :as version]))
+            [promesa.core :as p]
+            [frontend.ui :as ui]
+            [frontend.error :as error]))
+
+(defn set-global-error-notification!
+  []
+  (set! js/window.onerror
+        (fn [message, source, lineno, colno, error]
+          (when-not (error/ignored? message)
+            (notification/show!
+             (str "message=" message "\nsource=" source "\nlineno=" lineno "\ncolno=" colno "\nerror=" error)
+             :error
+             ;; Don't auto-hide
+             false)))))
 
 (defn- watch-for-date!
   []
@@ -42,12 +55,8 @@
 
 (defn store-schema!
   []
-  (storage/set :db-schema db-schema/schema))
-
-(defn schema-changed?
-  []
-  (when-let [schema (storage/get :db-schema)]
-    (not= schema db-schema/schema)))
+  (storage/set :db-schema (assoc db-schema/schema
+                                 :db/version db-schema/version)))
 
 (defn- get-me-and-repos
   []
@@ -60,27 +69,26 @@
      :logged? logged?
      :repos repos}))
 
-(declare restore-and-setup!)
-
-(defn clear-stores-and-refresh!
-  []
-  (p/let [_ (idb/clear-local-storage-and-idb!)]
-    (let [{:keys [me logged? repos]} (get-me-and-repos)]
-      (js/window.location.reload))))
-
 (defn restore-and-setup!
-  [me repos logged?]
+  [me repos logged? old-db-schema]
   (let [interval (atom nil)
         inner-fn (fn []
                    (when (and @interval js/window.pfs)
                      (js/clearInterval @interval)
                      (reset! interval nil)
-                     (-> (p/all (db/restore! (assoc me :repos repos)
-                                             (fn [repo]
-                                               (file-handler/restore-config! repo false)
-                                               (ui-handler/add-style-if-exists!))))
+                     (-> (p/all (db/restore!
+                                 (assoc me :repos repos)
+                                 old-db-schema
+                                 (fn [repo]
+                                   (file-handler/restore-config! repo false))))
                          (p/then
                           (fn []
+                            ;; try to load custom css only for current repo
+                            (ui-handler/add-style-if-exists!)
+
+                            ;; install after config is restored
+                            (shortcut/refresh!)
+
                             (cond
                               (and (not logged?)
                                    (not (seq (db/get-files config/local-repo)))
@@ -90,16 +98,13 @@
 
                               :else
                               (state/set-db-restoring! false))
-                            (if false   ; FIXME: incompatible changes
-                              (notification/show!
-                               [:p "Database schema changed, please export your notes as a zip file, and re-index your repos."]
-                               :warning
-                               false)
-                              (store-schema!))
 
-                            (nfs/ask-permission-if-local?)
+                            (store-schema!)
+
+                            (state/pub-event! [:modal/nfs-ask-permission])
 
                             (page-handler/init-commands!)
+
                             (when (seq (:repos me))
                               ;; FIXME: handle error
                               (common-handler/request-app-tokens!
@@ -109,7 +114,10 @@
                                  (js/console.error "Failed to request GitHub app tokens."))))
 
                             (watch-for-date!)
-                            (file-handler/watch-for-local-dirs!)))
+                            (file-handler/watch-for-local-dirs!)
+                            ;; (when-not (state/logged?)
+                            ;;   (state/pub-event! [:after-db-restore repos]))
+                            ))
                          (p/catch (fn [error]
                                     (log/error :db/restore-failed error))))))]
     ;; clear this interval
@@ -146,23 +154,31 @@
         [{:url config/local-repo
           :example? true}]))))
 
-(defn init-sentry
-  []
-  (let [cfg
-        {:dsn "https://636e9174ffa148c98d2b9d3369661683@o416451.ingest.sentry.io/5311485"
-         :release (util/format "logseq@%s" version/version)}]
-    (.init js/window.Sentry (clj->js cfg))))
-
 (defn on-load-events
   []
-  (let [f (fn []
-            (when-not config/dev? (init-sentry)))]
-    (set! js/window.onload f)))
+  (set! js/window.onload
+        (fn []
+          (instrument/init))))
+
+(defn clear-cache!
+  []
+  (p/let [_ (idb/clear-local-storage-and-idb!)
+          _ (when (util/electron?)
+              (ipc/ipc "clearCache"))]
+    (js/setTimeout #(js/window.location.reload %) 3000)))
+
+(defn- register-components-fns!
+  []
+  (state/set-page-blocks-cp! page/page-blocks-cp)
+  (state/set-editor-cp! editor/box))
 
 (defn start!
   [render]
-  (let [{:keys [me logged? repos]} (get-me-and-repos)]
+  (set-global-error-notification!)
+  (let [db-schema (storage/get :db-schema)
+        {:keys [me logged? repos]} (get-me-and-repos)]
     (when me (state/set-state! :me me))
+    (register-components-fns!)
     (state/set-db-restoring! true)
     (render)
     (on-load-events)
@@ -173,12 +189,17 @@
        (notification/show! "Sorry, it seems that your browser doesn't support IndexedDB, we recommend to use latest Chrome(Chromium) or Firefox(Non-private mode)." :error false)
        (state/set-indexedb-support! false)))
 
+    (events/run!)
+
     (p/let [repos (get-repos)]
       (state/set-repos! repos)
-      (restore-and-setup! me repos logged?))
+      (restore-and-setup! me repos logged? db-schema))
+
     (reset! db/*sync-search-indice-f search/sync-search-indice!)
     (db/run-batch-txs!)
     (file-handler/run-writes-chan!)
-    (editor-handler/periodically-save!)
     (when (util/electron?)
       (el/listen!))))
+
+(defn stop! []
+  (prn "stop!"))

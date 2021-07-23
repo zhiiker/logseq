@@ -37,13 +37,10 @@
 
 (defn group-by-page
   [blocks]
-  (some->> blocks
-           (group-by :block/page)))
-
-(defn group-by-file
-  [blocks]
-  (some->> blocks
-           (group-by :block/file)))
+  (if (:block/page (first blocks))
+    (some->> blocks
+             (group-by :block/page))
+    blocks))
 
 (defn get-tx-id [tx-report]
   (get-in tx-report [:tempids :db/current-tx]))
@@ -81,7 +78,7 @@
        (d/pull conn
                selector
                eid)
-       (catch js/Error e
+       (catch js/Error _e
          nil)))))
 
 (defn pull-many
@@ -114,3 +111,8 @@
    (when-let [db (conn/get-conn repo-url)]
      (some-> (d/entity db key)
              key))))
+
+(defn q
+  [query & inputs]
+  (when-let [repo (state/get-current-repo)]
+    (apply d/q query (conn/get-conn repo) inputs)))

@@ -5,7 +5,6 @@
             [frontend.components.svg :as svg]
             [frontend.handler.route :as route]
             [frontend.handler.page :as page-handler]
-            [frontend.handler.file :as file-handler]
             [frontend.db :as db]
             [frontend.handler.search :as search-handler]
             [frontend.ui :as ui]
@@ -33,8 +32,8 @@
     (let [q-words (string/split q #" ")
           lc-content (string/lower-case content)
           lc-q (string/lower-case q)]
-      (if (or (string/includes? lc-content lc-q)
-              (not (re-find #" " q)))
+      (if (and (string/includes? lc-content lc-q)
+              (not (util/safe-re-find #" " q)))
         (let [i (string/index-of lc-content lc-q)
               [before after] [(subs content 0 i) (subs content (+ i (count q)))]]
           [:p
@@ -75,8 +74,8 @@
   [repo uuid format content q search-mode]
   [:div [
          (when (not= search-mode :page)
-           [:div {:class "mb-1"} (block/block-parents {:id "block-search-block-parent" :block? true} repo (clojure.core/uuid uuid) format)])
-         [:div {:class "font-medium"} (highlight-exact-query content q)]]])
+           [:div {:class "mb-1" :key "parents"} (block/block-parents {:id "block-search-block-parent" :block? true} repo (clojure.core/uuid uuid) format)])
+         [:div {:class "font-medium" :key "content"} (highlight-exact-query content q)]]])
 
 (rum/defc highlight-fuzzy
   [content indexes]
@@ -141,30 +140,32 @@
 (rum/defc search-auto-complete
   [{:keys [pages files blocks has-more?] :as result} search-q all?]
   (rum/with-context [[t] i18n/*tongue-context*]
-    (let [new-file (when-let [ext (util/get-file-ext search-q)]
-                     (when (contains? config/mldoc-support-formats (keyword (string/lower-case ext)))
-                       [{:type :new-file}]))
-          pages (when-not all? (map (fn [page] {:type :page :data page}) pages))
+    (let [pages (when-not all? (map (fn [page] {:type :page :data page}) pages))
           files (when-not all? (map (fn [file] {:type :file :data file}) files))
           blocks (map (fn [block] {:type :block :data block}) blocks)
-          search-mode (state/get-search-mode)
+          search-mode (state/sub :search/mode)
           new-page (if (or
                         (and (seq pages)
                              (= (string/lower-case search-q)
                                 (string/lower-case (:data (first pages)))))
                         (nil? result)
-                        (not= :global search-mode)
                         all?)
                      []
                      [{:type :new-page}])
           result (if config/publishing?
                    (concat pages files blocks)
-                   (concat new-page pages new-file files blocks))]
-      [:div.rounded-md.shadow-lg
+                   (concat new-page pages files blocks))
+          result (if (= search-mode :graph)
+                   [{:type :graph-add-filter}]
+                   result)]
+      [:div.rounded-md.shadow-lg.search-ac
        {:style (merge
                 {:top 48
                  :left 32
-                 :width 700})
+                 :height 400
+                 :width 700
+                 :max-width "100%"
+                 :overflow "auto"})
         :class (if all? "search-all" "absolute")}
        (ui/auto-complete
         result
@@ -173,6 +174,9 @@
                       (search-handler/clear-search!)
                       (leave-focus)
                       (case type
+                        :graph-add-filter
+                        (state/add-graph-search-filter! search-q)
+
                         :new-page
                         (page-handler/create! search-q)
 
@@ -180,24 +184,25 @@
                         (route/redirect! {:to :page
                                           :path-params {:name data}})
 
-                        :new-file
-                        (file-handler/create! search-q)
-
                         :file
                         (route/redirect! {:to :file
                                           :path-params {:path data}})
 
                         :block
                         (let [block-uuid (uuid (:block/uuid data))
-                              page (:page/name (:block/page (db/entity [:block/uuid block-uuid])))]
-                          (route/redirect! {:to :page
-                                            :path-params {:name page}
-                                            :query-params {:anchor (str "ls-block-" (:block/uuid data))}}))
+                              collapsed? (db/parents-collapsed? (state/get-current-repo) block-uuid)]
+                          (if collapsed?
+                            (route/redirect! {:to :page
+                                              :path-params {:name (str block-uuid)}})
+                            (let [page (:block/name (:block/page (db/entity [:block/uuid block-uuid])))]
+                             (route/redirect! {:to :page
+                                               :path-params {:name page}
+                                               :query-params {:anchor (str "ls-block-" (:block/uuid data))}}))))
                         nil))
          :on-shift-chosen (fn [{:keys [type data]}]
                             (case type
                               :page
-                              (let [page (db/entity [:page/name (string/lower-case data)])]
+                              (let [page (db/entity [:block/name (string/lower-case data)])]
                                 (state/sidebar-add-block!
                                  (state/get-current-repo)
                                  (:db/id page)
@@ -213,16 +218,22 @@
                                  :block
                                  block))
 
+                              :new-page
+                              (page-handler/create! search-q)
+
+                              :file
+                              (route/redirect! {:to :file
+                                                :path-params {:path data}})
+
                               nil))
          :item-render (fn [{:keys [type data]}]
                         (let [search-mode (state/get-search-mode)]
                           [:div {:class "py-2"} (case type
+                                                  :graph-add-filter
+                                                  [:b search-q]
+
                                                   :new-page
                                                   [:div.text.font-bold (str (t :new-page) ": ")
-                                                   [:span.ml-1 (str "\"" search-q "\"")]]
-
-                                                  :new-file
-                                                  [:div.text.font-bold (str (t :new-file) ": ")
                                                    [:span.ml-1 (str "\"" search-q "\"")]]
 
                                                   :page
@@ -233,8 +244,8 @@
 
                                                   :block
                                                   (let [{:block/keys [page content uuid]} data
-                                                        page (or (:page/original-name page)
-                                                                 (:page/name page))
+                                                        page (or (:block/original-name page)
+                                                                 (:block/name page))
                                                         repo (state/sub :git/current-repo)
                                                         format (db/get-page-format page)]
                                                     (search-result-item "Block" (block-search-result-item repo uuid format content search-q search-mode)))
@@ -275,7 +286,7 @@
                   :else
                   300)]
     (rum/with-context [[t] i18n/*tongue-context*]
-      [:div#search.flex-1.flex
+      [:div#search.flex-1.flex.p-2
        [:div.inner
         [:label.sr-only {:for "search-field"} (t :search)]
         [:div#search-wrapper.relative.w-full.text-gray-400.focus-within:text-gray-600
@@ -283,7 +294,10 @@
           svg/search]
          [:input#search-field.block.w-full.h-full.pr-3.py-2.rounded-md.focus:outline-none.placeholder-gray-500.focus:placeholder-gray-400.sm:text-sm.sm:bg-transparent
           {:style {:padding-left "2rem"}
-           :placeholder (if (= search-mode :page)
+           :placeholder (case search-mode
+                          :graph
+                          (t :graph-search)
+                          :page
                           (t :page-search)
                           (t :search))
            :auto-complete (if (util/chrome?) "chrome-off" "off") ; off not working here
@@ -293,12 +307,12 @@
                           (js/clearTimeout @search-timeout))
                         (let [value (util/evalue e)]
                           (if (string/blank? value)
-                            (search-handler/clear-search!)
+                            (search-handler/clear-search! false)
                             (let [search-mode (state/get-search-mode)
                                   opts (if (= :page search-mode)
                                          (let [current-page (or (state/get-current-page)
                                                                 (date/today))]
-                                           {:page-db-id (:db/id (db/entity [:page/name (string/lower-case current-page)]))})
+                                           {:page-db-id (:db/id (db/entity [:block/name (string/lower-case current-page)]))})
                                          {})]
                               (state/set-q! value)
                               (reset! search-timeout

@@ -1,6 +1,7 @@
 (ns frontend.core
   (:require [rum.core :as rum]
             [frontend.handler :as handler]
+            [frontend.handler.plugin :as plugin-handler]
             [frontend.handler.route :as route]
             [frontend.page :as page]
             [frontend.routes :as routes]
@@ -8,7 +9,7 @@
             [frontend.log]
             [reitit.frontend :as rf]
             [reitit.frontend.easy :as rfe]
-            [api]))
+            [logseq.api]))
 
 (defn set-router!
   []
@@ -44,7 +45,8 @@
   ;; this is called in the index.html and must be exported
   ;; so it is available even in :advanced release builds
 
-  (handler/start! start)
+  (plugin-handler/setup!
+   #(handler/start! start))
 
   ;; popup to notify user, could be toggled in settings
   ;; (handler/request-notifications-if-not-asked)
@@ -55,4 +57,5 @@
 (defn stop []
   ;; stop is called before any code is reloaded
   ;; this is controlled by :before-load in the config
+  (handler/stop!)
   (js/console.log "stop"))

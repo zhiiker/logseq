@@ -2,8 +2,9 @@
 
 (defprotocol Fs
   (mkdir! [this dir])
+  (mkdir-recur! [this dir])
   (readdir [this dir])
-  (unlink! [this path opts])
+  (unlink! [this repo path opts])
   (rmdir! [this dir])
   (read-file [this dir path opts])
   (write-file! [this repo dir path content opts])

@@ -4,7 +4,7 @@
             [cljs-bean.core :as bean]
             [promesa.core :as p]
             [frontend.util :as util]
-            [frontend.text :as text]
+            [frontend.util.property :as property]
             [frontend.git :as git]
             [frontend.db :as db]
             [frontend.encrypt :as e]
@@ -15,7 +15,9 @@
             [cljs-time.format :as tf]
             [frontend.config :as config]
             ["ignore" :as Ignore]
-            ["/frontend/utils" :as utils]))
+            ["/frontend/utils" :as utils]
+            [frontend.date :as date]
+            [clojure.string :as string]))
 
 (defn get-ref
   [repo-url]
@@ -55,8 +57,8 @@
                  (js/console.dir error)))))))
 
 (defn copy-to-clipboard-without-id-property!
-  [content]
-  (util/copy-to-clipboard! (text/remove-id-property content)))
+  [format content]
+  (util/copy-to-clipboard! (property/remove-id-property format content)))
 
 (defn config-with-document-mode
   [config]
@@ -69,6 +71,27 @@
       (.add pattern)
       (.filter (bean/->js paths))
       (bean/->clj)))
+
+(defn- hidden?
+  [path patterns]
+  (let [path (if (and (string? path)
+                      (= \/ (first path)))
+               (subs path 1)
+               path)]
+    (some (fn [pattern]
+            (let [pattern (if (and (string? pattern)
+                                   (not= \/ (first pattern)))
+                            (str "/" pattern)
+                            pattern)]
+              (string/starts-with? (str "/" path) pattern))) patterns)))
+
+(defn remove-hidden-files
+  [files config get-path-fn]
+  (if-let [patterns (seq (:hidden config))]
+    (remove (fn [file]
+              (let [path (get-path-fn file)]
+                (hidden? path patterns))) files)
+    files))
 
 (comment
   (let [repo (state/get-current-repo)]
@@ -83,15 +106,19 @@
   [repo-url]
   (db/get-file repo-url (config/get-config-path)))
 
+(defn safe-read-string
+  [content error-message]
+  (try
+    (reader/read-string content)
+    (catch js/Error e
+      (println error-message)
+      (js/console.dir e)
+      {})))
+
 (defn reset-config!
   [repo-url content]
   (when-let [content (or content (get-config repo-url))]
-    (let [config (try
-                   (reader/read-string content)
-                   (catch js/Error e
-                     (println "Parsing config file failed: ")
-                     (js/console.dir e)
-                     {}))]
+    (let [config (safe-read-string content "Parsing config file failed: ")]
       (state/set-config! repo-url config)
       config)))
 
@@ -160,3 +187,29 @@
                    (do (log/error :token/failed-get-token token-m)
                        (reject)))))
              nil))))))))
+
+(defn get-page-default-properties
+  [page-name]
+  {:title page-name
+   ;; :date (date/get-date-time-string)
+   })
+
+(defn fix-pages-timestamps
+  [pages]
+  (map (fn [{:block/keys [name created-at updated-at journal-day] :as p}]
+         (cond->
+           p
+
+           (nil? created-at)
+           (assoc :block/created-at
+                  (if journal-day
+                    (date/journal-day->ts journal-day)
+                    (util/time-ms)))
+
+           (nil? updated-at)
+           (assoc :block/updated-at
+                  ;; Not exact true
+                  (if journal-day
+                    (date/journal-day->ts journal-day)
+                    (util/time-ms)))))
+    pages))

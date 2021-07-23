@@ -67,6 +67,7 @@
 }
 
 .cp__sidebar-main-content {
+  width: 100%;
   max-width: var(--ls-main-content-max-width);
   flex: 1;
 
@@ -113,15 +114,14 @@
     width: var(--ls-right-sidebar-width);
   }
 
-  &::-webkit-scrollbar {
-    display: none;
+  &-scollable {
+    min-height: 100%;
+    overflow-y: scroll;
   }
 
   &-inner {
     padding-top: 0;
     position: relative;
-    min-height: 100%;
-    overflow-y: scroll;
 
     .resizer {
       position: absolute;
@@ -143,7 +143,6 @@
 
     &-btn {
       display: block;
-      padding: 13px 5px;
       white-space: nowrap;
     }
   }
@@ -156,6 +155,12 @@
       right: 0;
       background-color: var(--ls-secondary-background-color, #d8e1e8);
       z-index: 999;
+      user-select: none;
+      -webkit-app-region: drag;
+
+      a, svg {
+          -webkit-app-region: no-drag;
+      }
   }
 
   .page {
@@ -166,10 +171,6 @@
   pre,
   pre.code {
     background: var(--ls-right-sidebar-code-bg-color);
-  }
-
-  pre.CodeMirror-line {
-    background: #fff;
   }
 
   .references {
@@ -198,4 +199,20 @@
 
 .cp__sidebar-main-content[data-is-global-graph-pages='true'] {
   padding: 0;
+}
+
+.scrollbar-spacing {
+  height: 100%;
+}
+
+@supports not (overflow-y: overlay) {
+  .scrollbar-spacing {
+    overflow-y: auto;
+  }
+}
+
+@supports (overflow-y: overlay) {
+  .scrollbar-spacing {
+    overflow-y: overlay;
+  }
 }

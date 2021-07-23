@@ -1,0 +1,142 @@
+(ns frontend.util.property-test
+  (:require [cljs.test :refer [deftest is are testing]]
+            [frontend.util.property :as property]))
+
+(deftest remove-id-property
+  (testing "org"
+    (are [x y] (= (property/remove-id-property :org x) y)
+      "hello\n:PROPERTIES:\n:id: f9873a81-07b9-4246-b910-53a6f5ec7e04\n:END:\n"
+      "hello\n:PROPERTIES:\n:END:"
+
+      "hello\n:PROPERTIES:\n:id: f9873a81-07b9-4246-b910-53a6f5ec7e04\na: b\n:END:\n"
+      "hello\n:PROPERTIES:\na: b\n:END:"))
+  (testing "markdown"
+    (are [x y] (= (property/remove-id-property :markdown x) y)
+      "hello\nid:: f9873a81-07b9-4246-b910-53a6f5ec7e04"
+      "hello"
+
+      "hello\nid:: f9873a81-07b9-4246-b910-53a6f5ec7e04\n\nworld"
+      "hello\n\nworld"
+
+      "hello\naa:: bb\nid:: f9873a81-07b9-4246-b910-53a6f5ec7e04\n\nworld"
+      "hello\naa:: bb\n\nworld")))
+
+(deftest test-remove-properties
+  (testing "properties with non-blank lines"
+    (are [x y] (= x y)
+      (property/remove-properties :org "** hello\n:PROPERTIES:\n:x: y\n:END:\n")
+      "** hello"
+
+      (property/remove-properties :org "** hello\n:PROPERTIES:\n:x: y\na:b\n:END:\n")
+      "** hello"
+
+      (property/remove-properties :markdown "** hello\nx:: y\na:: b\n")
+      "** hello"
+
+      (property/remove-properties :markdown "** hello\nx:: y\na::b\n")
+      "** hello\na::b"))
+
+  (testing "properties with blank lines"
+    (are [x y] (= x y)
+      (property/remove-properties :org "** hello\n:PROPERTIES:\n\n:x: y\n:END:\n")
+      "** hello"
+
+      (property/remove-properties :org "** hello\n:PROPERTIES:\n:x: y\n\na:b\n:END:\n")
+      "** hello"
+
+      (property/remove-properties :markdown "** hello\nx:: y\n\na:: b\n")
+      "** hello\n")))
+
+(deftest test-insert-property
+  (are [x y] (= x y)
+    (property/insert-property :org "hello" "a" "b")
+    "hello\n:PROPERTIES:\n:a: b\n:END:\n"
+
+    (property/insert-property :org "hello" "a" false)
+    "hello\n:PROPERTIES:\n:a: false\n:END:\n"
+
+    (property/insert-property :org "hello\n:PROPERTIES:\n:a: b\n:END:\n" "c" "d")
+    "hello\n:PROPERTIES:\n:a: b\n:c: d\n:END:"
+
+    (property/insert-property :org "hello\n:PROPERTIES:\n:a: b\n:END:\nworld\n" "c" "d")
+    "hello\n:PROPERTIES:\n:a: b\n:c: d\n:END:\nworld"
+
+    (property/insert-property :org "#+BEGIN_QUOTE
+ hello world
+  #+END_QUOTE" "c" "d")
+    ":PROPERTIES:\n:c: d\n:END:\n#+BEGIN_QUOTE\n hello world\n  #+END_QUOTE"
+
+    (property/insert-property :markdown "hello\na:: b\nworld\n" "c" "d")
+    "hello\na:: b\nc:: d\nworld"
+
+    (property/insert-property :markdown "> quote" "c" "d")
+    "c:: d\n> quote"
+
+    (property/insert-property :markdown "#+BEGIN_QUOTE
+ hello world
+  #+END_QUOTE" "c" "d")
+    "c:: d\n#+BEGIN_QUOTE\n hello world\n  #+END_QUOTE"))
+
+(deftest test-insert-properties
+  (are [x y] (= x y)
+    (property/insert-properties :markdown "" {:foo "bar"})
+    "foo:: bar"
+
+    (property/insert-properties :markdown "" {"foo" "bar"})
+    "foo:: bar"
+
+    (property/insert-properties :markdown "" {"foo space" "bar"})
+    "foo-space:: bar"
+
+    (property/insert-properties :markdown "" {:foo #{"bar" "baz"}})
+    "foo:: [[bar]], [[baz]]"
+
+    (property/insert-properties :markdown "" {:foo ["bar" "bar" "baz"]})
+    "foo:: [[bar]], [[baz]]"
+
+    (property/insert-properties :markdown "a\nb\n" {:foo ["bar" "bar" "baz"]})
+    "a\nfoo:: [[bar]], [[baz]]\nb"
+
+    (property/insert-properties :markdown "" {:foo "\"bar, baz\""})
+    "foo:: \"bar, baz\""))
+
+(deftest test->new-properties
+  (are [x y] (= (property/->new-properties x) y)
+    ":PROPERTIES:\n:foo: bar\n:END:"
+    "foo:: bar"
+
+    "hello\n:PROPERTIES:\n:foo: bar\n:END:"
+    "hello\nfoo:: bar"
+
+    "hello\n:PROPERTIES:\n:foo: bar\n:nice: bingo\n:END:"
+    "hello\nfoo:: bar\nnice:: bingo"
+
+    "hello\n:PROPERTIES:\n:foo: bar\n:nice: bingo\n:END:\n"
+    "hello\nfoo:: bar\nnice:: bingo"
+
+    "hello\n:PROPERTIES:\n:foo: bar\n:nice: bingo\n:END:\nnice"
+    "hello\nfoo:: bar\nnice:: bingo\nnice"
+
+    "hello\n:PROPERTIES:\n:foo: bar\n:nice:\n:END:\nnice"
+    "hello\nfoo:: bar\nnice:: \nnice"
+
+    "hello\n:PROPERTIES:\n:foo: bar\n:nice\n:END:\nnice"
+    "hello\nfoo:: bar\n:nice\nnice"))
+
+(deftest test-build-properties-str
+  (are [x y] (= (property/build-properties-str :mardown x) y)
+    {:title "a"}
+    "title:: a\n"
+    {:title "a/b/c"}
+    "title:: a/b/c\n"
+    {:title "a/b/c" :tags "d,e"}
+    "title:: a/b/c\ntags:: d,e\n")
+  (are [x y] (= (property/build-properties-str :org x) y)
+    {:title "a"}
+    ":PROPERTIES:\n:title: a\n:END:\n"
+    {:title "a/b/c"}
+    ":PROPERTIES:\n:title: a/b/c\n:END:\n"
+    {:title "a/b/c" :tags "d,e"}
+    ":PROPERTIES:\n:title: a/b/c\n:tags: d,e\n:END:\n"))
+
+#_(cljs.test/run-tests)
